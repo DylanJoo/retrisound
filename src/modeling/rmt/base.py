@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 
 class RMTBaseModel(torch.nn.Module):
+
     def __init__(self, base_model, **rmt_kwargs):
         super().__init__()
         self.model = base_model
@@ -12,13 +13,13 @@ class RMTBaseModel(torch.nn.Module):
         self.rmt_config = rmt_config
         self.extract_special_tokens(tokenizer)
         self.extend_word_embeddings(num_mem_tokens, tokenizer)
-
         self.segment_size = rmt_config['input_size'] - num_mem_tokens - tokenizer.num_special_tokens_to_add()
         if 'sep_token' in tokenizer.special_tokens_map:
             self.segment_size -= 1
 
     def set_memory(self, input_shape):
-        memory = self.model.embeddings(self.mem_token_ids)
+        embeddings = self.model.get_input_embeddings()
+        memory = embeddings(self.mem_token_ids)
         memory = memory.repeat(input_shape[0], 1, 1)
         return memory
 
@@ -34,27 +35,29 @@ class RMTBaseModel(torch.nn.Module):
                 setattr(self, token, None)
 
     def extend_word_embeddings(self, num_mem_tokens, tokenizer):
-            
+        """ add the memory tokens right after the special tokens e.g., [CLS] """
+
         vocab_size = self.model.config.vocab_size
         extended_vocab_size = vocab_size + num_mem_tokens
         self.num_mem_tokens = num_mem_tokens
+        ## extend a few tokens that start from the end of embeddings table.
         self.register_buffer('mem_token_ids', torch.arange(vocab_size, vocab_size + num_mem_tokens))
         self.model.resize_token_embeddings(extended_vocab_size)
 
         special_tokens = tokenizer.special_tokens_map
         mem_start_ind = int('cls_token' in special_tokens or 'bos_token' in special_tokens)
         self.memory_position = range(mem_start_ind, mem_start_ind + num_mem_tokens)
-        self.model.embeddings = self.model.get_input_embeddings()
+        # self.model.embeddings = self.model.get_input_embeddings()
 
     def forward(self, **kwargs):
        raise NotImplementedError
 
     def pad_and_segment(self, input_ids):
         segmented_batch = []
-        for seq in input_ids:
+        for seq in input_ids: # iterate over the batch 
             drop_mask = torch.any(torch.stack([seq == t for t in self.special_token_ids if t is not None]), dim=0)
-            seq = seq[~drop_mask]
-            seq = seq[:self.segment_size * self.rmt_config['max_n_segments']]
+            seq = seq[~drop_mask] # remove all the special tokens as they would be added afterward
+            seq = seq[:self.segment_size * self.rmt_config['max_n_segments']] # take the maximumn length of inputs
 
             align = self.rmt_config.get('segment_alignment')
             if align in {'right', None}:
@@ -84,12 +87,19 @@ class RMTBaseModel(torch.nn.Module):
         raise NotImplementedError
 
     def prepare_kwargs(self, segment_input_ids, kwargs):
+        """
+        1) map the embedding table for this segment
+        2) get every additional input args for this segment
+
+        non_empty_mask: this will apply on batchwise manner (i.e., i-th segment for examples in batch)
+        """
         seg_kwargs = dict(**kwargs)
         non_empty_mask = [s is not None for s in segment_input_ids]
         if sum(non_empty_mask) == 0:
             return None, non_empty_mask
             
-        input_ids = torch.stack([s for s in segment_input_ids if s is not None])
+        # input_ids = torch.stack([s for s in segment_input_ids if s is not None])
+        input_ids = torch.stack([s for s in segment_input_ids if len(s) == 0])
         inputs_embeds = self.model.embeddings(input_ids)
 
         seg_kwargs['input_ids'] = None
