@@ -1,15 +1,19 @@
-import os
+# import torch.nn.functional as F
 import torch
-import transformers
-import torch.nn as nn
-import torch.nn.functional as F
+from typing import Optional, Tuple
 from transformers import BertModel
+from transformers.modeling_outputs import BaseModelOutput
+from dataclasses import dataclass
+
+@dataclass
+class BiEncoderOutput(BaseModelOutput):
+    emb: torch.FloatTensor = None
+    last_hidden_state: torch.FloatTensor = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 class Contriever(BertModel):
-    def __init__(self, config, add_pooling_layer=False, pooling='mean', **kwargs):
+    def __init__(self, config, add_pooling_layer=False, **kwargs):
         super().__init__(config, add_pooling_layer=add_pooling_layer)
-        self.config.pooling = pooling
-        self.outputs = None
 
     def forward(
         self,
@@ -23,8 +27,6 @@ class Contriever(BertModel):
         encoder_attention_mask=None,
         output_attentions=None,
         output_hidden_states=None,
-        return_multi_vectors=False,
-        pooling=None
     ):
 
         model_output = super().forward(
@@ -43,10 +45,6 @@ class Contriever(BertModel):
         last_hidden_states = model_output["last_hidden_state"]
         last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
 
-        pooling = (pooling or self.config.pooling)
         emb = last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
 
-        if return_multi_vectors:
-            return emb, last_hidden 
-        else:
-            return (emb, None)
+        return BiEncoderOutput(emb=emb, last_hidden_state=last_hidden)

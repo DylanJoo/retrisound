@@ -41,6 +41,7 @@ class RMTEncoder(RMTBaseModel):
         if self.num_mem_tokens == 0: # means the original one
             input_ids = input_ids[-1:] 
 
+        ada_embeds = []
         base_model_outputs = []
         for seg_num in range(len(input_ids)): # length of semgnets
 
@@ -66,18 +67,27 @@ class RMTEncoder(RMTBaseModel):
                 'token_type_ids': None, # put everything zeros
             }
             out = self.model(**seg_kwargs)
-            base_model_outputs.append(out)
-            
-            ## the memory position of the last hidden states 
-            # memory[non_empty_mask] = out.hidden_states[-1][:, self.memory_position]
             memory[non_empty_mask] = out.last_hidden_state[:, self.memory_position]
+            if seg_num == 0:
+                ada_hidden_state = self.adaptive_pooling(out) # available for each batch
+            else:
+                ada_hidden_state[non_empty_mask] = self.adaptive_pooling(out)
 
-        out = self.process_outputs(
-            base_model_outputs, 
-            output_attentions, 
-            output_hidden_states
-        )
-        return out
+            print(ada_hidden_state)
+            ## log outputs and ada_hidden_state
+            base_model_outputs.append(out)
+            ada_embeds.append(ada_hidden_state.clone())
+
+        out = self.process_outputs(base_model_outputs, 
+                                   output_attentions=False,
+                                   output_hidden_states=True)
+        return out, torch.stack(ada_embeds, dim=1) # B N_segs H
+
+    def adaptive_pooling(self, out):
+        # option1: average of [CLS] [MEM] [SEP]
+        hidden_state = out.last_hidden_state[:, :(self.num_mem_tokens+2)].mean(1)
+        return hidden_state
+        # option2: average of everything (but this is not like contriever only use segment1)
 
     def add_special_tokens_and_masks(self, tensors, masks):
         """
@@ -104,14 +114,13 @@ class RMTEncoder(RMTBaseModel):
         # we may need to adjust the output here (or directly change the return of forward)
         Save the multiple encoded representation of RMT-Enc
         """
-        rmt_out = model_outputs[-1]
-        print(model_outputs[0]['last_hidden_state'][:, :3])
-        print(model_outputs[1]['last_hidden_state'][:, :3])
+        rmt_out = model_outputs[-1] # the last segment
 
         segment_keys = ['loss']
         if output_attentions:
             segment_keys.append('attentions')
         if output_hidden_states:
+            segment_keys.append('last_hidden_state')
             segment_keys.append('hidden_states')
 
         extracted = {}
@@ -126,7 +135,7 @@ class RMTEncoder(RMTBaseModel):
 
         for key, value in extracted.items():
             rmt_out[key] = value
-        
+
         # drop unnecessary hiddens to save memory
         if not output_hidden_states:
             for key in rmt_out.keys():
