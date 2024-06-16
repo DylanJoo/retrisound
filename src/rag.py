@@ -3,11 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 import copy
+from typing import Optional, Union, List, Dict, Tuple, Any
 
 import random
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List, Mapping
 from transformers.modeling_outputs import BaseModelOutput
+from prompt.qampari import *
 
 @dataclass
 class RAGOutput(BaseModelOutput):
@@ -18,9 +20,10 @@ class RAGOutput(BaseModelOutput):
 
 class RerankAugmentedGeneration(nn.Module):
 
-    def __init__(self, llm, biencoders=None):
+    def __init__(self, llm, tokenizer, biencoders=None):
         super().__init__()
         self.llm = llm
+        self.tokenizer = tokenizer
         self.biencoders = biencoders # could be inbatch
 
         # freeze G and R's d-encoder
@@ -33,11 +36,11 @@ class RerankAugmentedGeneration(nn.Module):
 
     def forward(
         self, 
-        questions, 
-        labels=None,
-        passages=None,
-        pids=None, 
-        inputs_for_retrieval=None,
+        question: List[str],
+        answers: List[List[str]] = None,
+        contexts: Optional[List[List[Dict]]] = None,
+        pids: Optional[List[List[str]]] = None,
+        inputs_for_retrieval: Optional[Dict] = None,
         **kwargs
     ):
         """
@@ -45,7 +48,7 @@ class RerankAugmentedGeneration(nn.Module):
         ------
         question: the initial questions.
         labels: this is for generation.
-        passages: the retrieved passages (could be furtehr updated during train)
+        contexts: i.e., the retrieved passages 
         pids: the context budgets
         """
         loss, loss_ret, loss_gen = 0.0, 0.0, 0.0
@@ -60,18 +63,37 @@ class RerankAugmentedGeneration(nn.Module):
             passages = [corpus[pid] for pid in updated_pids]
             # [TODO] can revise the pids with this one.
 
-        ## step2. prepare context
-        contexts = []
-        for i in range(len(questions)):
-            D = apply_docs_prompt(passages[i], field='text')
+        ## step2. prepare context 
+        ## [TODO] cleaner to move this section to another function
+        prompts = []
+        for i in range(len(question)):
+            D = apply_docs_prompt(contexts[i], field='text')
             prompt = apply_inst_prompt(
-                Q=questions[i], D=D,
+                Q=question[i], 
+                D=D,
                 instruction=instruction_prompt,
                 add_prefix=True
-            )
-            contexts.append(prompt)
-        ### tokenization
-        inputs = self.tokenizer(prompts, return_tensors='pt').to(self.model.device)
+            ).replace('{DEMO}', '')
+            prompts.append(prompt)
+
+        ### Prepare source target
+        inputs = self.tokenizer([f"{prompt} {answer}" \
+            for (prompt, answer) in zip(prompts, answers)],
+            padding=True,
+            truncation=True,
+            return_tensors='pt'
+        ).to(self.llm.device)
+        labels = inputs['input_ids'].clone()
+
+        #### get source length
+        source_len = [len(token) for token in self.tokenizer(
+            prompts, truncation=True
+        )]
+        source_mask = torch.zeros( labels.shape)
+        for i, s in enumerate(source_len):
+            source_mask[i, :(s-1)] = 1
+        #### replace label as
+        labels.masked_fill_(source_mask.bool(), -100)
 
         ## step3. Generate with prompt (with context)
         output = self.llm(**inputs, labels=labels)
@@ -79,9 +101,7 @@ class RerankAugmentedGeneration(nn.Module):
         ## computing losses
         CELoss = nn.CrossEntropyLoss()
         KLLoss = nn.KLDivLoss(reduction='batchmean')
-        logs = {}
-
-        logs.update({'ret_nll': loss_ret, 'gen_nll': loss_gen, 'div': loss_div})
+        logs = {'ret_nll': loss_ret, 'gen_nll': loss_gen}
 
         return RAGOutput(
             loss=loss_ret+loss_gen,

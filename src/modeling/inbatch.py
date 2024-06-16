@@ -8,7 +8,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List, Mapping
 from transformers.modeling_outputs import BaseModelOutput
-from modeling import dist_utils
+from .dist_utils import gather
 
 @dataclass
 class InBatchOutput(BaseModelOutput):
@@ -61,7 +61,7 @@ class InBatchInteraction(nn.Module):
         cemb = self.d_encoder(input_ids=c_tokens, attention_mask=c_mask)[0]
 
         if self.is_ddp:
-            gather_fn = dist_utils.gather
+            gather_fn = gather
             qemb = gather_fn(qemb)
             cemb = gather_fn(cemb)
             data_index = gather_fn(data_index).detach().cpu().numpy().tolist()

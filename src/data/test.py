@@ -13,9 +13,13 @@ print(dataset[0])
 features = [dataset[i] for i in range(4)]
 from qampari import ContextQACollator
 from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-collator = ContextQACollator(tokenizer=tokenizer)
+tokenizer_r = AutoTokenizer.from_pretrained('bert-base-uncased')
+tokenizer_g = AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v1.0')
+collator = ContextQACollator(
+    tokenizer_r=tokenizer_r,
+    tokenizer_g=tokenizer_g
+)
 
 d=collator(features)
-print(d)
+print(d.keys())
 

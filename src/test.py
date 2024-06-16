@@ -13,7 +13,7 @@ model_opt = ModelOptions(
 train_opt = TrainOptions()
 
 ## prepare bi-encoders
-tokenizer = AutoTokenizer.from_pretrained(R_model_name_or_path)
+tokenizer_r = AutoTokenizer.from_pretrained(R_model_name_or_path)
 from modeling.rmt import RMTEncoder
 from modeling.rife import Contriever
 model = Contriever.from_pretrained(R_model_name_or_path)
@@ -21,11 +21,11 @@ encoder = deepcopy(model)
 ada_encoder = RMTEncoder(
         base_model=model, 
         num_mem_tokens=4,
-        tokenizer=tokenizer,
+        tokenizer=tokenizer_r,
         input_size=512,
         sum_loss=False
 )
-from inbatch import InBatchInteraction
+from modeling import InBatchInteraction
 bi_encoders = InBatchInteraction(
         model_opt, 
         q_encoder=ada_encoder,
@@ -42,18 +42,32 @@ generator = AutoModelForCausalLM.from_pretrained(
 )
         # attn_implementation="flash_attention_2"
 
+tokenizer_g = AutoTokenizer.from_pretrained(G_model_name_or_path)
 from rag import RerankAugmentedGeneration
-model = RerankAugmentedGeneration(llm=generator, biencoders=bi_encoders)
+model = RerankAugmentedGeneration(
+        llm=generator, 
+        tokenizer=tokenizer_g,
+        biencoders=bi_encoders,
+)
+# for n, p in model.named_parameters():
+#     if p.requires_grad:
+#         print(n)
 
-for n, p in model.named_parameters():
-    if p.requires_grad:
-        print(n)
+## add data
+from data.qampari import ContextQADataset
+dataset = ContextQADataset(
+    data_file='/home/dju/datasets/qampari/test_data.jsonl',
+    n_max_segments=10,
+    corpus_file=None,
+    budget=None
+)
+dataset.add_action(0, 'this is a testing action')
 
-# input = tokenizer(['hello world', 'apple'], return_tensors='pt', padding=True)
-# input_ids = [input['input_ids'], input['input_ids']]
-# attention_mask = [input['attention_mask'], input['attention_mask']]
-# out = q_encoder(input_ids=input_ids, attention_mask=attention_mask)
-# # print(out[0]['last_hidden_state_0'][0, :4, :10])
-# # print(out[0]['last_hidden_state_1'][0, :4, :10])
-# print(out[1][0])
-# print(out[1][1])
+features = [dataset[i] for i in range(4)]
+from data.qampari import ContextQACollator
+collator = ContextQACollator(
+    tokenizer_r=tokenizer_r,
+    tokenizer_g=tokenizer_g
+)
+d=collator(features)
+model(**d)

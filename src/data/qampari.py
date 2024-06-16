@@ -35,7 +35,7 @@ class ContextQADataset(Dataset):
         self.gold_context = [[] for _ in range(self.length)]
 
         ## dynamic attributes
-        self.context_pids = [[] for _ in range(self.length)] # will be empty in the begining
+        self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
         self.actions = [["" for _ in range(self.n_max_segments - 1)] for _ in range(self.length)]
         self._build(data)
 
@@ -43,11 +43,11 @@ class ContextQADataset(Dataset):
             self._load_corpus(corpus_file)
         else:
             empty = {'text': "", 'title': ""}
-            self.corpus = defaultdict(lambda x: empty)
+            self.corpus = defaultdict(lambda: empty)
 
         ## add context buffer count
         ## None means everything
-        self.budget = (0 or budget) 
+        self.budget = budget
 
     def _load_corpus(self, file):
         """ under-construction """
@@ -86,17 +86,18 @@ class ContextQADataset(Dataset):
         raise NotImplementedError
 
     def __getitem__(self, idx):
-        pids = self.context_pids[idx][self.budget:]
+        pids = self.context_pids[idx][:self.budget]
         return {'question': self.questions[idx], 
                 'actions': self.actions[idx],
                 'answers': self.answer_list[idx],
-                'context': [self.corpus[pid] for pid in pids],
+                'contexts': [self.corpus[pid] for pid in pids],
                 'pids': pids}
 
 
 @dataclass
 class ContextQACollator(DefaultDataCollator):
-    tokenizer: Union[PreTrainedTokenizerBase] = None
+    tokenizer_r: Union[PreTrainedTokenizerBase] = None
+    tokenizer_g: Union[PreTrainedTokenizerBase] = None
     truncation: Union[bool, str] = True
     padding: Union[bool, str, PaddingStrategy] = 'longest'
     max_src_length: Union[int] = 256
@@ -123,11 +124,12 @@ class ContextQACollator(DefaultDataCollator):
         list-of-segs: [ features_of_segment1, features_of_segment2, ...]
         """
         batch = {}
+        batch_r = {}
         batch_size = len(features)
         n_max_segments = len(features[0]['actions']) + 1 
 
         # encode the initial request
-        initial_q = self.tokenizer.batch_encode_plus(
+        initial_q = self.tokenizer_r.batch_encode_plus(
             [f['question'] for f in features],
             add_special_tokens=True,
             max_length=self.max_src_length,
@@ -135,8 +137,8 @@ class ContextQACollator(DefaultDataCollator):
             padding=self.padding,
             return_tensors='pt'
         )
-        batch['input_ids'] = [initial_q['input_ids']]
-        batch['attention_mask'] = [initial_q['attention_mask']]
+        batch_r['input_ids'] = [initial_q['input_ids']]
+        batch_r['attention_mask'] = [initial_q['attention_mask']]
 
         # encode the action/followup text
         ## encode the action segment-by-segment
@@ -144,7 +146,7 @@ class ContextQACollator(DefaultDataCollator):
             ### collect action for every batch first
             ### [NOTE] the empty string will return empty list
             batch_action_q = [ features[b]['actions'][seg_num] for b in range(batch_size) ]
-            action_q = self.tokenizer.batch_encode_plus(
+            action_q = self.tokenizer_r.batch_encode_plus(
                 batch_action_q,
                 add_special_tokens=True,
                 max_length=self.max_src_length,
@@ -152,26 +154,25 @@ class ContextQACollator(DefaultDataCollator):
                 padding=self.padding,
                 return_tensors='pt'
             )
-            batch['input_ids'].append(action_q['input_ids'])
-            batch['attention_mask'].append(action_q['attention_mask'])
+            batch_r['input_ids'].append(action_q['input_ids'])
+            batch_r['attention_mask'].append(action_q['attention_mask'])
 
         ## rewarding: (1) token adjustment (2) mask for calculating likelihood
         ## Here should consider the decoder's input and output template
-        targets = self.tokenizer.batch_encode_plus(
-            [", ".join(f) for f in features],  # maybe here can do sth, like ordering
-            max_length=self.max_tgt_length,
-            truncation=self.truncation,
-            padding=self.padding,
-            return_tensors='pt'
-        )
-        batch['labels'] = targets.input_ids # seq-likelihood
-
+        # targets = self.tokenizer_g.batch_encode_plus(
+        #     [", ".join(f['answers']) for f in features],  # maybe here can do sth, like ordering
+        #     max_length=self.max_tgt_length,
+        #     truncation=self.truncation,
+        #     padding=self.padding,
+        #     return_tensors='pt'
+        # )
+        batch['question'] = [f['question'] for f in features] # R, Rprec
+        batch['contexts'] = [f['contexts'] for f in features] # R, Rprec
         batch['answers'] = [f['answers'] for f in features] # R, Rprec
         batch['pids'] = [f['pids'] for f in features] # evid-R, evid-Rprec
-
+        batch['inputs_for_retriever'] = batch_r
+        # batch['labels'] = targets.input_ids  # done in model loop
+        # batch['decoder_attention_mask'] = targets.attention_mask 
         return batch
-        # features['inputs_for_retrieval'] = batch
-        # return features
-
 
 

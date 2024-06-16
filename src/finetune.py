@@ -9,7 +9,6 @@ import sys
 import random
 import datasets
 import torch
-from functools import partial
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
@@ -76,57 +75,44 @@ def main():
 
     accelerator.wait_for_everyone()
 
-    # [Generatir Config & tokenizer & Model]
-    config = AutoConfig.from_pretrained(
-            model_opt.config_name or model_opt.model_name_or_path
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-            model_opt.tokenizer_name or model_opt.model_name_or_path,
-            use_fast=True
-    )
-    ## [TODO] Check further the accurate setup for llama
-    tokenizer, context_markups = init_tokenizer(
-            tokenizer, 
-            model_opt.use_special_tokens
-    )
-    generator = AutoModelForCausalLM.from_pretrained(
-            model_opt.model_name_or_path,
-            from_tf=bool('.ckpt' in model_opt.model_name_or_path),
-            config=config,
-            low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
-            attn_implementation="flash_attention_2",
-    )
-    if train_opt.gradient_checkpointing:
-        model.gradient_checkpointing_enable()
-
     # [Retriever Bi-encoder]
+    tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     from modeling.rmt import RMTEncoder
     from modeling.rife import Contriever
-    tokenizer_ret = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     model = Contriever.from_pretrained(model_opt.retriever_name_or_path)
-    d_encoder = deepcopy(model)
+    encoder = deepcopy(model)
     ada_encoder = RMTEncoder(
-            base_model=model, 
-            tokenizer=tokenizer,
-            num_mem_tokens=10,
-            max_n_segments=10,
-            input_size=(512-10-3),
-            sum_loss=False,
+        base_model=model, 
+        tokenizer=tokenizer_r,
+        num_mem_tokens=10,
+        max_n_segments=10,
+        input_size=(512-10-3),
+        sum_loss=False,
     )
-    from inbatch import InBatchInteraction
+    from modeling.inbatch import InBatchInteraction
     bi_encoders = InBatchInteraction(
-            model_opt,
-            q_encoder=ada_encoder,
-            d_encoder=encoder
-            fixed_d_encoder=True
-    )
-    from rag import RerankAugmentedGeneration
-    model = RerankAugmentedGeneration(
-            opt=model_opt,
-            llm=generator,
-            biencoders=bi_encoders
+        model_opt,
+        q_encoder=ada_encoder,
+        d_encoder=encoder
+        fixed_d_encoder=True
     )
 
+    # [Generatir Config & tokenizer & Model]
+    ## [TODO] Check further the accurate setup of tokenizer for llama
+    tokenizer = AutoTokenizer.from_pretrained(
+            model_opt.generator_name_or_path, 
+            use_fast=True
+    )
+    tokenizer, context_markups = init_tokenizer(
+        tokenizer, model_opt.use_special_tokens
+    )
+    config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
+    generator = AutoModelForCausalLM.from_pretrained(
+        model_opt.model_name_or_path,
+        config=config,
+        low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
+        attn_implementation=train_opt.attn_implementation, 
+    )
     # We resize the embeddings only when necessary to avoid index errors. 
     # If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -134,31 +120,41 @@ def main():
     if len(tokenizer) > embedding_size:
         model.llm.resize_token_embeddings(len(tokenizer))
 
+    # [RAG]
+    from rag import RerankAugmentedGeneration
+    model = RerankAugmentedGeneration(
+        llm=generator,
+        tokenizer=tokenizer,
+        biencoders=bi_encoders
+    )
+    if train_opt.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+
     # [Data]
     from data.qampari import ContextQADataset, ContextQACollator
     train_dataset = ContextQADataset(
-            data_file=data_opt.train_file, 
-            n_max_segments=10,
-            corpus_file=None
-            quick_test=True
+        data_file=data_opt.train_file, 
+        n_max_segments=10,
+        corpus_file=None
+        quick_test=True
     )
-    ### check the input dataset ###
-    for index in train_ids:
-        logger.info(f"Sample {index}: {train_dataset[index]}.")
+    logger.info(f"Sample {index}: {train_dataset[0]}.")
+    logger.info(f"Sample {index}: {train_dataset[2]}.")
     # eval_dataset = ContextQADataset(data_opt.eval_file)
     ## load corpus: TBD
 
     # [Data] dataloader with collator
+    ## [TODO] add sampler by action size (e.g., less to more)
     data_collator = ContextQACollator(
-            tokenizer=tokenizer, 
-            model=model, 
-            padding='longest'
+        tokenizer=tokenizer, 
+        model=model, 
+        padding='longest'
     )
     train_dataloader = DataLoader(
-            train_dataset,
-            shuffle=True,
-            collate_fn=data_collator,
-            batch_size=train_opt.per_device_train_batch_size,
+        train_dataset,
+        shuffle=True,
+        collate_fn=data_collator,
+        batch_size=train_opt.per_device_train_batch_size,
     )
 
     # [optimizer] Split weights in two groups, one with weight decay and the other not.
@@ -205,7 +201,7 @@ def main():
         experiment_config = asdict(train_opt)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("rag-debug", experiment_config)
+        accelerator.init_trackers("retrisound-debug", experiment_config)
 
     # Train!
     total_batch_size = train_opt.per_device_train_batch_size * accelerator.num_processes * train_opt.gradient_accumulation_steps

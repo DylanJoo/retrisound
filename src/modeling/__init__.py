@@ -1,0 +1,1 @@
+from .inbatch import InBatchInteraction
