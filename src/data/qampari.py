@@ -1,4 +1,6 @@
+import json
 import numpy as np
+from tqdm import tqdm
 from torch.utils.data import Dataset
 from collections import defaultdict
 from datasets import load_dataset
@@ -21,7 +23,11 @@ class ContextQADataset(Dataset):
         budget=None,
         quick_test=None
     ):
-        data = load_dataset('json', data_files=data_file, keep_in_memory=True)['train']
+        data = []
+        with open(data_file, 'r') as f:
+            for line in tqdm(f):
+                data.append(json.loads(line.strip()))
+
         if quick_test is not None:
             data = data[:16]
 
@@ -67,7 +73,7 @@ class ContextQADataset(Dataset):
 
                 for proof in answer['proof']:
                     self.proof[idx].append(proof['proof_text'])
-                    self.gold_context[idx].append(proof['pid'])
+                    self.gold_context[idx].append(proof['pid']) # this is not actually the chunk_id for corpus
 
     def __len__(self):
         return len(self.questions)
