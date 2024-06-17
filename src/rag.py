@@ -57,7 +57,9 @@ class RerankAugmentedGeneration(nn.Module):
         if inputs_for_retrieval is not None:
             ### top-k retrieval 
             #### reranking by bi-encoders
-            scores = self.biencoders(**inputs_for_retrieval)
+            scores = self.biencoders(
+                q_tokens=inputs_for_retrieval['input_ids']
+            )
             retrieved_pids = dosomething(scores)
             updated_pids = dosomething(retrieved_pids, pids)
             passages = [corpus[pid] for pid in updated_pids]

@@ -20,6 +20,7 @@ class ContextQADataset(Dataset):
         data_file, 
         n_max_segments=10,
         corpus_file=None,
+        retrieval_file=None,
         budget=None,
         quick_test=None
     ):
@@ -35,6 +36,7 @@ class ContextQADataset(Dataset):
         self.n_max_segments = n_max_segments
 
         ## fixed attributes 
+        self.qids = [None] * self.length
         self.questions = [None] * self.length
         self.answer_list = [[] for _ in range(self.length)]
         self.proof = [[] for _ in range(self.length)] 
@@ -45,15 +47,30 @@ class ContextQADataset(Dataset):
         self.actions = [["" for _ in range(self.n_max_segments - 1)] for _ in range(self.length)]
         self._build(data)
 
-        if corpus_file:
+        ## corpus for mapping
+        if corpus_file is not None:
             self._load_corpus(corpus_file)
         else:
             empty = {'text': "", 'title': ""}
             self.corpus = defaultdict(lambda: empty)
 
+        ## results for context candidates
+        if retrieval_file is not None:
+            self._load_retrieval(retrieval_file)
+        else:
+            self.candidate_pids = None
+
         ## add context buffer count
         ## None means everything
         self.budget = budget
+
+    def _load_retrieval(self, file):
+        self.candidate_pids = defaultdict(list)
+        with open(file, 'r') as f:
+            for line in f:
+                # 224__wikidata_intersection__dev Q0 56651458__0 1 20.10360 bm25
+                qid, _, docid, rank, score, _ = line.strip().split()
+                self.candidate_pids[qid].append(docid)
 
     def _load_corpus(self, file):
         """ under-construction """
@@ -66,6 +83,7 @@ class ContextQADataset(Dataset):
 
     def _build(self, data):
         for idx in range(self.length):
+            self.qids[idx] = data[idx]['qid']
             self.questions[idx] = data[idx]['question_text']
 
             for answer in data[idx]['answer_list']:
@@ -92,12 +110,14 @@ class ContextQADataset(Dataset):
         raise NotImplementedError
 
     def __getitem__(self, idx):
-        pids = self.context_pids[idx][:self.budget]
+        ctx_pids = self.context_pids[idx][:self.budget]
+        all_pids = self.candidate_pids[self.qids[idx]]
         return {'question': self.questions[idx], 
                 'actions': self.actions[idx],
                 'answers': self.answer_list[idx],
-                'contexts': [self.corpus[pid] for pid in pids],
-                'pids': pids}
+                'contexts': [self.corpus[pid] for pid in ctx_pids],
+                'candidates': [self.corpus[pid] for pid in all_pids],
+                'pids': ctx_pids}
 
 
 @dataclass
