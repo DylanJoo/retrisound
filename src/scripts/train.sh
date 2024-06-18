@@ -15,20 +15,9 @@ conda activate retrisound
 index_dir=${HOME}/indexes/qampari
 data_dir=${HOME}/datasets/qampari
 
-# Indexing
-# python -m pyserini.index.lucene \
-#     --collection JsonCollection \
-#     --input ${data_dir}/wikipedia_chunks/chunks_v5 \
-#     --index ${index_dir}/wikipedia_080121.lucene \
-#     --generator DefaultLuceneDocumentGenerator \
-#     --threads 64
-
-# Search
-for split in train dev test;do
-    python retrieval/bm25_search.py \
-        --k 100 --k1 0.9 --b 0.4 \
-        --index ${index_dir}/wikipedia_080121.lucene \
-        --topic ${data_dir}/${split}_data.jsonl \
-        --batch_size 32 \
-        --output ${data_dir}/${split}_data_bm25-top100.run
-done
+python -m pyserini.index.lucene \
+    --collection JsonCollection \
+    --input ${data_dir}/wikipedia_chunks/chunks_v5 \
+    --index ${index_dir}/wikipedia_080121.lucene \
+    --generator DefaultLuceneDocumentGenerator \
+    --threads 64

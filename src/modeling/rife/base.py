@@ -6,7 +6,7 @@ from transformers.modeling_outputs import BaseModelOutput
 from dataclasses import dataclass
 
 @dataclass
-class BiEncoderOutput(BaseModelOutput):
+class EncoderOutput(BaseModelOutput):
     emb: torch.FloatTensor = None
     last_hidden_state: torch.FloatTensor = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
@@ -46,5 +46,4 @@ class Contriever(BertModel):
         last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
 
         emb = last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
-
-        return BiEncoderOutput(emb=emb, last_hidden_state=last_hidden)
+        return EncoderOutput(emb=emb, last_hidden_state=last_hidden)

@@ -1,6 +1,5 @@
 import json
 import torch
-from utils import load_corpus_file
 import numpy as np
 from glob import glob
 from tqdm import tqdm
@@ -10,11 +9,11 @@ from datasets import load_dataset
 from dataclasses import dataclass, field
 from typing import Optional, Union, List, Dict, Tuple, Any
 from transformers import DefaultDataCollator
-
 from transformers.tokenization_utils_base import (
     PreTrainedTokenizerBase,
     PaddingStrategy, 
 )
+from .utils import load_corpus_file
 
 class ContextQADataset(Dataset):
 
@@ -58,7 +57,7 @@ class ContextQADataset(Dataset):
         self.corpus = {-1: {'text': "", 'title': ""}}
 
         ## dynamic attributes
-        self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
+        # self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
         self.actions = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
         self._build(data)
 
@@ -79,12 +78,13 @@ class ContextQADataset(Dataset):
 
     def _load_retrieval(self, file):
         self.candidate_pids = defaultdict(list)
+        empty = {'text': "", 'title': ""}
         with open(file, 'r') as f:
             for line in tqdm(f):
                 qid, _, docid, rank, score, _ = line.strip().split()
                 if int(rank) <= self.n_max_candidates:
                     self.candidate_pids[qid].append(docid)
-                    self.corpus[docid] = {}
+                    self.corpus[docid] = empty
                     # remove this if `_load_corpus` doesn't need to predefine
 
     def _load_corpus(self, dir):
@@ -133,13 +133,13 @@ class ContextQADataset(Dataset):
 
     def __getitem__(self, idx):
         qid = self.qids[idx]
-        ctx_pids = self.context_pids[idx][:self.budget] # can be qid or idx
+        # ctx_pids = self.context_pids[idx][:self.budget] # can be qid or idx
+        cand_pids = self.candidate_pids[qid][:self.budget] # can be qid or idx
         return {'question': self.questions[idx], 
                 'actions': self.actions[idx],
                 'answers': self.answer_list[idx],
-                'context_pids': ctx_pids, # this is for reader
-                'contexts': [self.corpus[pid] for pid in ctx_pids], # this is for reader 
-                'candidate_pids': self.candidate_pids[qid][:self.depth],} # this is for reranker
+                'candidate_pids': cand_pids, 
+                'candidates': [self.corpus[pid] for pid in cand_pids],} # this is for reranker 
 
 @dataclass
 class ContextQACollator(DefaultDataCollator):
@@ -203,38 +203,30 @@ class ContextQACollator(DefaultDataCollator):
             batch_r['q_mask'].append(action_q['attention_mask'])
 
         # encode the candidate texts
-        d_tokens = []
-        d_mask = []
-        for b in range(batch_size):
-            contexts = self.tokenizer_r.batch_encode_plus(
-                [f"{c['title']} {c['text']}" for c in features[b]['contexts']],
+        candidate_size = len(features[0]['candidates'])
+        batch_r['d_tokens'] = []
+        batch_r['d_mask'] = []
+        for ctx in range(candidate_size):
+            candidate = self.tokenizer_r.batch_encode_plus(
+                [f"{features[b]['candidates'][ctx]['title']} {features[b]['candidates'][ctx]['text']}" for b in range(batch_size)],
                 add_special_tokens=True,
                 max_length=self.max_src_length,
                 truncation=self.truncation,
                 padding=self.padding,
                 return_tensors='pt'
             )
-            d_tokens.append(contexts['input_ids'])
-            d_mask.append(contexts['attention_mask'])
-        batch_r['d_tokens'] = torch.stack(d_tokens)
-        batch_r['d_mask'] = torch.stack(d_mask)
-
-        action_q = self.tokenizer_r.batch_encode_plus(
-            batch_action_q,
-            add_special_tokens=True,
-            max_length=self.max_src_length,
-            truncation=self.truncation,
-            padding=self.padding,
-            return_tensors='pt'
-        )
+            batch_r['d_tokens'].append(candidate['input_ids'])
+            batch_r['d_mask'].append(candidate['attention_mask'])
 
         ## rewarding: (1) token adjustment (2) mask for calculating likelihood
-        batch['question'] = [f['question'] for f in features] # R, Rprec
-        batch['contexts'] = [f['contexts'] for f in features] # R, Rprec
-        batch['answers'] = [f['answers'] for f in features] # R, Rprec
-        batch['targets'] = ["#".join(f['answers']) for f in features] # R, Rprec
-        batch['pids'] = [f['pids'] for f in features] # evid-R, evid-Rprec
+        batch['question'] = [f['question'] for f in features] 
+        batch['targets'] = ["#".join(f['answers']) for f in features] 
+        batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
+        # evid-R, evid-Rprec
+        batch['answers'] = [f['answers'] for f in features] 
+        # evid-R, evid-Rprec
+        batch['candidate_pids'] = [f['candidate_pids'] for f in features] 
         return batch
 
 

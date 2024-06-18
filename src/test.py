@@ -54,20 +54,29 @@ model = RerankAugmentedGeneration(
 #         print(n)
 
 ## add data
+split='test'
 from data.qampari import ContextQADataset
 dataset = ContextQADataset(
-    data_file='/home/dju/datasets/qampari/test_data.jsonl',
+    data_file=f'/home/dju/datasets/qampari/{split}_data.jsonl',
     n_max_segments=10,
+    n_max_candidates=50,
+    budget=5,
+    depth=10,
     corpus_file=None,
-    budget=None
+    retrieval_file=f'/home/dju/datasets/qampari/{split}_data_bm25-top100.run',
+    quick_test=True
 )
+    # corpus_file='/home/dju/datasets/qampari/wikipedia_chunks/chunks_v5',
 dataset.add_action(0, 'this is a testing action')
 
 features = [dataset[i] for i in range(4)]
+print(features)
 from data.qampari import ContextQACollator
 collator = ContextQACollator(
     tokenizer_r=tokenizer_r,
     tokenizer_g=tokenizer_g
 )
 d=collator(features)
-model(**d)
+print(d['inputs_for_retriever'])
+o=model(**d)
+print(o.loss)

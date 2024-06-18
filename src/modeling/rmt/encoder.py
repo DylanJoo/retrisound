@@ -2,6 +2,14 @@ import inspect
 import torch
 import torch.nn.functional as F
 from .base import RMTBaseModel
+from typing import Optional, Tuple
+from transformers.modeling_outputs import BaseModelOutput
+from dataclasses import dataclass
+
+@dataclass
+class RMTEncoderOutput(BaseModelOutput):
+    emb: torch.FloatTensor = None
+    last_hidden_state: torch.FloatTensor = None
 
 class RMTEncoder(RMTBaseModel):
 
@@ -42,13 +50,15 @@ class RMTEncoder(RMTBaseModel):
             input_ids = input_ids[-1:] 
 
         ada_embeds = []
-        base_model_outputs = []
+        # base_model_outputs = []
         for seg_num in range(len(input_ids)): # length of semgnets
 
             ## first obtaib the non-empty segment (each would be differ)
             segment_input_ids = input_ids[seg_num]
             segment_attention_mask = attention_mask[seg_num]
             non_empty_mask = [len(s) > 2 for s in segment_input_ids]
+            if sum(non_empty_mask) == 0:
+                continue # skip this loop if all are empty
 
             ## expand input_ids with memory and special tokens
             segment_input_ids, segment_attention_mask = self.add_special_tokens_and_masks(
@@ -73,18 +83,24 @@ class RMTEncoder(RMTBaseModel):
             else:
                 ada_hidden_state[non_empty_mask] = self.adaptive_pooling(out)
 
-            print(ada_hidden_state)
+            # print(ada_hidden_state)
             ## log outputs and ada_hidden_state
-            base_model_outputs.append(out)
+            # base_model_outputs.append(out)
             ada_embeds.append(ada_hidden_state.clone())
 
-        out = self.process_outputs(base_model_outputs, 
-                                   output_attentions=False,
-                                   output_hidden_states=True)
-        return out, torch.stack(ada_embeds, dim=1) # B N_segs H
+        return RMTEncoderOutput(
+            emb=None,
+            last_hidden_state=torch.stack(ada_embeds, dim=1) # B N_segs H
+        )
+        # out = self.process_outputs(base_model_outputs, 
+        #                            output_attentions=False,
+        #                            output_hidden_states=True)
+        # return {'outputs': out, 'embeds': torch.stack(ada_embeds, dim=1)} # B N_segs H
 
     def adaptive_pooling(self, out):
-        # option1: average of [CLS] [MEM] [SEP]
+        """
+        option1: average of [CLS] [MEM] [SEP]
+        """
         hidden_state = out.last_hidden_state[:, :(self.num_mem_tokens+2)].mean(1)
         return hidden_state
         # option2: average of everything (but this is not like contriever only use segment1)

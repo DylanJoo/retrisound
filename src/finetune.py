@@ -30,9 +30,7 @@ from transformers import (
 )
 
 from utils import init_tokenizer
-# from template import encode_with_prompt_completion_format, encode_with_messages_format
 
-os.environ['WANDB_PROJECT'] = 'rag'
 logger = get_logger(__name__)
 
 def main():
@@ -84,9 +82,9 @@ def main():
     ada_encoder = RMTEncoder(
         base_model=model, 
         tokenizer=tokenizer_r,
-        num_mem_tokens=10,
-        max_n_segments=10,
-        input_size=(512-10-3),
+        num_mem_tokens=model_opt.num_mem_tokens,
+        max_n_segments=train_opt.max_n_segments,
+        input_size=(256-model_opt.num_mem_tokens-3),
         sum_loss=False,
     )
     from modeling.inbatch import InBatchInteraction
@@ -99,13 +97,11 @@ def main():
 
     # [Generatir Config & tokenizer & Model]
     ## [TODO] Check further the accurate setup of tokenizer for llama
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer_g = AutoTokenizer.from_pretrained(
             model_opt.generator_name_or_path, 
             use_fast=True
     )
-    tokenizer, context_markups = init_tokenizer(
-        tokenizer, model_opt.use_special_tokens
-    )
+    tokenizer_g, _= init_tokenizer(tokenizer_g, model_opt.use_special_tokens)
     config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
     generator = AutoModelForCausalLM.from_pretrained(
         model_opt.model_name_or_path,
@@ -134,8 +130,10 @@ def main():
     from data.qampari import ContextQADataset, ContextQACollator
     train_dataset = ContextQADataset(
         data_file=data_opt.train_file, 
-        n_max_segments=10,
-        corpus_file=None
+        n_max_segments=train_opt.n_max_segments,
+        n_max_candidates=train_opt.n_max_candidates,
+        corpus_file=data_opt.corpus_file,
+        retrieval_file=data_opt.retrieval_file,
         quick_test=True
     )
     logger.info(f"Sample {index}: {train_dataset[0]}.")
@@ -146,9 +144,8 @@ def main():
     # [Data] dataloader with collator
     ## [TODO] add sampler by action size (e.g., less to more)
     data_collator = ContextQACollator(
-        tokenizer=tokenizer, 
-        model=model, 
-        padding='longest'
+        tokenizer_r=tokenizer_r,
+        tokenizer_g=tokenizer_g,
     )
     train_dataloader = DataLoader(
         train_dataset,

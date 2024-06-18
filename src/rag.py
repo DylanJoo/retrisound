@@ -14,9 +14,9 @@ from prompt.qampari import *
 @dataclass
 class RAGOutput(BaseModelOutput):
     loss: torch.FloatTensor = None
-    ret_nll: torch.FloatTensor = None
-    gen_nll: torch.FloatTensor = None
-    rg_kl: torch.FloatTensor = None
+    loss_r: torch.FloatTensor = None
+    loss_g: torch.FloatTensor = None
+    loss_kl: torch.FloatTensor = None
 
 class RerankAugmentedGeneration(nn.Module):
 
@@ -37,10 +37,10 @@ class RerankAugmentedGeneration(nn.Module):
     def forward(
         self, 
         question: List[str],
-        answers: List[List[str]] = None,
-        contexts: Optional[List[List[Dict]]] = None,
-        pids: Optional[List[List[str]]] = None,
-        inputs_for_retrieval: Optional[Dict] = None,
+        targets: List[str] = None,
+        candidates: Optional[List[List[Dict]]] = None,
+        k: int = 5,
+        inputs_for_retriever: Optional[Dict] = None,
         **kwargs
     ):
         """
@@ -51,19 +51,26 @@ class RerankAugmentedGeneration(nn.Module):
         contexts: i.e., the retrieved passages 
         pids: the context budgets
         """
-        loss, loss_ret, loss_gen = 0.0, 0.0, 0.0
+        loss, loss_r, loss_g = 0.0, 0.0, 0.0
 
         ## step1. Retrieve documents and prepare the context
-        if inputs_for_retrieval is not None:
-            ### top-k retrieval 
+        ## [NOTE] this could be move the `train.py`
+        if inputs_for_retriever is not None:
             #### reranking by bi-encoders
-            scores = self.biencoders(
-                q_tokens=inputs_for_retrieval['input_ids']
-            )
-            retrieved_pids = dosomething(scores)
-            updated_pids = dosomething(retrieved_pids, pids)
-            passages = [corpus[pid] for pid in updated_pids]
-            # [TODO] can revise the pids with this one.
+            output_r = self.biencoders(**inputs_for_retriever)
+            loss_r = output_r.loss
+            ## reorder/select documents
+            contexts = []
+            for candidate, ranking in zip(candidates, output_r.reranking):
+                context = [p for _, p in sorted(zip(ranking, candidate))]
+                contexts.append(context[:k])
+
+            # [TODO] this is the post-G actions
+            # retrieved_pids = dosomething(output_r.scores)
+            # updated_pids = dosomething(retrieved_pids, pids)
+            # passages = [corpus[pid] for pid in updated_pids]
+        else:
+            contexts = [ctx[:k] for ctx in candidates]
 
         ## step2. prepare context 
         ## [TODO] cleaner to move this section to another function
@@ -79,37 +86,34 @@ class RerankAugmentedGeneration(nn.Module):
             prompts.append(prompt)
 
         ### Prepare source target
-        inputs = self.tokenizer([f"{prompt} {answer}" \
-            for (prompt, answer) in zip(prompts, answers)],
+        inputs = self.tokenizer([f"{prompt} {target}" \
+            for (prompt, target) in zip(prompts, targets)],
             padding=True,
             truncation=True,
             return_tensors='pt'
         ).to(self.llm.device)
-        labels = inputs['input_ids'].clone()
 
-        #### get source length
-        source_len = [len(token) for token in self.tokenizer(
-            prompts, truncation=True
-        )]
-        source_mask = torch.zeros( labels.shape)
+        #### get source length and revise labels
+        labels = inputs['input_ids'].clone()
+        tokenized_prompt = self.tokenizer(prompts, truncation=True)['input_ids']
+        source_len = [len(tokens) for tokens in tokenized_prompt]
         for i, s in enumerate(source_len):
-            source_mask[i, :(s-1)] = 1
-        #### replace label as
-        labels.masked_fill_(source_mask.bool(), -100)
+            labels[i, :(s-1)] = -100
 
         ## step3. Generate with prompt (with context)
-        output = self.llm(**inputs, labels=labels)
+        output_g = self.llm(**inputs, labels=labels)
 
-        ## computing losses
-        CELoss = nn.CrossEntropyLoss()
-        KLLoss = nn.KLDivLoss(reduction='batchmean')
-        logs = {'ret_nll': loss_ret, 'gen_nll': loss_gen}
+        # loss_ret = output_r.loss
+        loss_g = output_g.loss
+        logs = {'InfoNCE': loss_r, 'mle': loss_g}
 
+        ## computing additional alignment loss
+        # KLLoss = nn.KLDivLoss(reduction='batchmean')
         return RAGOutput(
-            loss=loss_ret+loss_gen,
-            ret_nll=loss_ret,
-            gen_nll=loss_gen,
-            rg_kl=None
+            loss=loss_r+loss_g,
+            loss_r=loss_r,
+            loss_g=loss_g,
+            loss_kl=None
         )
 
 class RetrievalAugmentedGeneration():

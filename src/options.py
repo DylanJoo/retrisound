@@ -13,7 +13,7 @@ class ModelOptions:
     add_pooling_layer: Optional[bool] = field(default=False)
     use_special_tokens: Optional[bool] = field(default=False) # check
     temperature: Optional[float] = field(default=1.0)
-    # n_negative_samples: Optional[int] = field(default=0)
+    n_negative_samples: Optional[int] = field(default=0)
     fixed_d_encoder: Optional[bool] = field(default=False)
     num_mem_tokens: Optional[int] = field(default=16)
 
@@ -27,4 +27,5 @@ class TrainOptions(TrainingArguments):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     low_cpu_mem_usage: Optional[bool] = field(default=False) 
     attn_implementation: str = field(default=None)
-    max_n_segments: Optional[int] = field(default=8)
+    n_max_segments: Optional[int] = field(default=2)
+    n_max_candidates: Optional[int] = field(default=10)

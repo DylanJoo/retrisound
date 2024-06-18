@@ -12,11 +12,9 @@ from .dist_utils import gather
 
 @dataclass
 class InBatchOutput(BaseModelOutput):
-    ret_nll: torch.FloatTensor = None
-    gen_nll: torch.FloatTensor = None
-    rg_kl: torch.FloatTensor = None
-    qemb: Optional[torch.FloatTensor] = None
-    cemb: Optional[torch.FloatTensor] = None
+    loss: torch.FloatTensor = None
+    reranking: Optional[torch.FloatTensor] = None
+    indices: Optional[List] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
 
 class InBatchInteraction(nn.Module):
@@ -38,7 +36,8 @@ class InBatchInteraction(nn.Module):
                 p.requires_grad = False
 
         # distributed 
-        self.is_ddp = dist.is_initialized()
+        # self.is_ddp = dist.is_initialized()
+        self.is_ddp = False
 
         # learning hyperparameter
         self.tau = opt.temperature
@@ -50,73 +49,79 @@ class InBatchInteraction(nn.Module):
     def forward(
         self, 
         q_tokens, q_mask, 
-        c_tokens, c_mask, 
+        d_tokens, d_mask, 
         data_index=None,
         **kwargs
     ):
         loss = 0.0
         loss_ret = 0.0
-        loss_div = 0.0
-        qemb = self.encoder(input_ids=q_tokens, attention_mask=q_mask)[0]
-        cemb = self.d_encoder(input_ids=c_tokens, attention_mask=c_mask)[0]
+        batch_size = len(q_tokens)
+        max_length = d_tokens[0]
+
+        qembs = self.q_encoder(
+            input_ids=q_tokens, 
+            attention_mask=q_mask
+        ).last_hidden_state  # B N_seg H
+
+        dembs = []
+        for i in range(len(d_tokens)):
+            demb = self.d_encoder(
+                input_ids=d_tokens[i],
+                attention_mask=d_mask[i]
+            ).emb  # B H
+            dembs.append(demb)
+        dembs = torch.stack(dembs, dim=1) # B N_cand H
+
+        ## 1) conetxt list-wise ranking for b-th batch
+        ### q <- qembs[b, :, :] N_seg H 
+        ### d <- dembs[b, :, :] N_cand H 
+        ### ranking (candidates) <- N_seg N_cand
+        reranking = []
+        alpha = 0
+        # for b in range(batch_size):
+        #     score = qembs[b] @ demb[b].T # (N_seg H) x (N_cand H)
+        #     r_ranking = 1/(alpha + 1 + (-score).argsort(-1)) # reciprocal
+        #     print(r_ranking)
+        #     reranking.append(r_ranking.sum(-2)) # N_seg x N_cand
+        # print(reranking)
+        # reranking = torch.stack(reranking, dim=0)
+
+        scores = qembs @ demb.mT # (B N_seg H) x (B N_cand H) = B N_seg N_cand
+        r_ranking = 1/(alpha + 1 + (-scores).argsort(-1)) # reciprocal
+        reranking = r_ranking.sum(-2).argsort(-1) # B N_cand
+
+        # if self.is_ddp:
+        #     gather_fn = gather
+        #     ranking = gather_fn(ranking)
+        #     data_index = gather_fn(data_index).detach().cpu().numpy().tolist()
+
+        ## 2) constrastive learning
+        ### q <- qembs[:, 0, :] B (1) H. the first segment
+        ### d <- dembs[:, 0, :] B (1) H. the first context (would change)
+        ### scores (constrastive) <- B B 
+        qemb_ibn = qembs[:, 0, :] # B H
+        demb_ibn = dembs[:, 0, :] # B H
+        ## [NOTE] here can also add negative by selecting bottom doc in cand
 
         if self.is_ddp:
             gather_fn = gather
-            qemb = gather_fn(qemb)
-            cemb = gather_fn(cemb)
-            data_index = gather_fn(data_index).detach().cpu().numpy().tolist()
+            demb_ibn = gather_fn(demb_ibn)
 
-        bsz = qemb.size(0) # query-centric batch 
-        labels = torch.arange(0, bsz, dtype=torch.long, device=q_tokens.device)
+        labels = torch.arange(0, qemb_ibn.size(0), dtype=torch.long, 
+                              device=qemb_ibn.device)
 
-        ## [st-st]
-        if self.miner is not None:
-            if self.miner.negative_jsonl is not None:
-                # use prebuilt negatives
-                neg_inputs = self.miner.batch_get_negative_inputs(
-                        data_index,
-                        n=self.n_negative_samples
-                )
-            else:
-                # mine online
-                neg_inputs = self.miner.crop_depedent_from_docs(
-                        embeds_1=qemb.clone().detach().cpu(), 
-                        embeds_2=cemb.clone().detach().cpu(),
-                        indices=data_index,
-                        n=self.n_negative_samples, k0=0, k=100, 
-                        exclude_overlap=False,
-                        to_return='spans_tokens',
-                )
-            neg_vectors = self.encoder(
-                    input_ids=neg_inputs[0].to(self.encoder.device),
-                    attention_mask=neg_inputs[1].to(self.encoder.device)
-            )[0]
-        else:
-            neg_vectors = None
-
-        if neg_vectors is not None:
-            scores_q = torch.einsum("id, jd->ij", 
-                    qemb / self.tau, torch.cat([cemb, neg_vectors], dim=0))
-            scores_c = torch.einsum("id, jd->ij", 
-                    cemb / self.tau, torch.cat([qemb, neg_vectors], dim=0))
-        else:
-            scores_q = torch.einsum("id, jd->ij", qemb / self.tau, cemb)
-            scores_c = torch.einsum("id, jd->ij", cemb / self.tau, qemb)
+        rel_scores = torch.einsum("id, jd->ij", qemb_ibn/self.tau, demb_ibn)
 
         ## computing losses
         CELoss = nn.CrossEntropyLoss()
-        KLLoss = nn.KLDivLoss(reduction='batchmean')
-
-        logs = {}
-        loss_ret = (CELoss(scores_q, labels) + CELoss(scores_c, labels)) / 2
-
-        logs.update({'ret_nll': loss_ret, 'gen_nll': loss_gen, 'div': loss_div})
+        loss_ret = CELoss(rel_scores, labels)
+        logs = {'infoNCE': loss_ret}
 
         return InBatchOutput(
-            loss=loss_ret + loss_gen + loss_div,
-            acc=accuracy, 
+            loss=loss_ret,
+            reranking=reranking,
+            indices=data_index,
             logs=logs, 
-            qemb=qemb, 
         )
 
     def get_encoder(self):

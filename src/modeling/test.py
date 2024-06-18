@@ -18,11 +18,12 @@ q_encoder = RMTEncoder(
 )
 
 input = tokenizer(['hello world', 'apple'], return_tensors='pt', padding=True)
-input_ids = [input['input_ids'], input['input_ids']]
-attention_mask = [input['attention_mask'], input['attention_mask']]
+input_ids = [input['input_ids'], input['input_ids'], input['input_ids']]
+attention_mask = [input['attention_mask'], input['attention_mask'], input['attention_mask']]
 out = q_encoder(input_ids=input_ids, attention_mask=attention_mask)
 # print(out[0]['last_hidden_state_0'][0, :4, :10])
 # print(out[0]['last_hidden_state_1'][0, :4, :10])
-print(out[1][0])
-print(out[1][1])
+print(out.shape)
+print(out[0])
+print(out[1])
 
