@@ -1,5 +1,8 @@
 import json
+import torch
+from utils import load_corpus_file
 import numpy as np
+from glob import glob
 from tqdm import tqdm
 from torch.utils.data import Dataset
 from collections import defaultdict
@@ -19,11 +22,21 @@ class ContextQADataset(Dataset):
         self, 
         data_file, 
         n_max_segments=10,
+        n_max_candidates=50,
+        depth=10,
+        budget=None,
         corpus_file=None,
         retrieval_file=None,
-        budget=None,
         quick_test=None
     ):
+        """
+        params
+        ------
+        n_max_segment: the max number of segments (exclude the initial q)
+        n_max_candidates: the max depth of considered intialized retrieval
+        depth: the size of psg for re-ranking as candidates may change
+        budget: the size of psg for later generator to read
+        """
         data = []
         with open(data_file, 'r') as f:
             for line in tqdm(f):
@@ -34,6 +47,7 @@ class ContextQADataset(Dataset):
 
         self.length = len(data)
         self.n_max_segments = n_max_segments
+        self.n_max_candidates = n_max_candidates
 
         ## fixed attributes 
         self.qids = [None] * self.length
@@ -41,18 +55,12 @@ class ContextQADataset(Dataset):
         self.answer_list = [[] for _ in range(self.length)]
         self.proof = [[] for _ in range(self.length)] 
         self.gold_context = [[] for _ in range(self.length)]
+        self.corpus = {-1: {'text': "", 'title': ""}}
 
         ## dynamic attributes
         self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
-        self.actions = [["" for _ in range(self.n_max_segments - 1)] for _ in range(self.length)]
+        self.actions = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
         self._build(data)
-
-        ## corpus for mapping
-        if corpus_file is not None:
-            self._load_corpus(corpus_file)
-        else:
-            empty = {'text': "", 'title': ""}
-            self.corpus = defaultdict(lambda: empty)
 
         ## results for context candidates
         if retrieval_file is not None:
@@ -60,26 +68,38 @@ class ContextQADataset(Dataset):
         else:
             self.candidate_pids = None
 
+        ## corpus for mapping
+        if corpus_file is not None:
+            self._load_corpus(corpus_file)
+
         ## add context buffer count
         ## None means everything
-        self.budget = budget
+        self.depth = depth
+        self.budget = (budget or depth)
 
     def _load_retrieval(self, file):
         self.candidate_pids = defaultdict(list)
         with open(file, 'r') as f:
-            for line in f:
-                # 224__wikidata_intersection__dev Q0 56651458__0 1 20.10360 bm25
+            for line in tqdm(f):
                 qid, _, docid, rank, score, _ = line.strip().split()
-                self.candidate_pids[qid].append(docid)
+                if int(rank) <= self.n_max_candidates:
+                    self.candidate_pids[qid].append(docid)
+                    self.corpus[docid] = {}
+                    # remove this if `_load_corpus` doesn't need to predefine
 
-    def _load_corpus(self, file):
-        """ under-construction """
-        self.corpus = defaultdict(dict)
-        with open(file, 'r') as f:
-            for line in f:
-                item = json.loads(line.strip())
-                self.corpus[docid]['text'] = item['text']
-                self.corpus[docid]['title'] = item['title']
+    def _load_corpus(self, dir):
+        from multiprocessing import Pool
+        files = glob(f'{dir}/*jsonl')
+        with Pool(16) as pool:
+            corpora = pool.map(load_corpus_file, files)
+
+        for corpus in tqdm(corpora):
+            for docid, docdict in corpus.items():
+                try:
+                    self.corpus[docid].update(docdict)
+                except:
+                    continue
+                    # not in the retrieved budget
 
     def _build(self, data):
         for idx in range(self.length):
@@ -103,6 +123,8 @@ class ContextQADataset(Dataset):
         except: # means it's full
             self.actions[idx].pop(0) # remove the first one
             self.actions[idx].append(act)
+        # self.actions[idx] += [act]
+        # self.actions[idx] = self.actions[idx][-(self.n_max_segments):]
 
     def adjust_context(self, idx, act, context):
         # act: the choices of action for adjusting context. ['add', 'remove', ]
@@ -110,15 +132,14 @@ class ContextQADataset(Dataset):
         raise NotImplementedError
 
     def __getitem__(self, idx):
-        ctx_pids = self.context_pids[idx][:self.budget]
-        all_pids = self.candidate_pids[self.qids[idx]]
+        qid = self.qids[idx]
+        ctx_pids = self.context_pids[idx][:self.budget] # can be qid or idx
         return {'question': self.questions[idx], 
                 'actions': self.actions[idx],
                 'answers': self.answer_list[idx],
-                'contexts': [self.corpus[pid] for pid in ctx_pids],
-                'candidates': [self.corpus[pid] for pid in all_pids],
-                'pids': ctx_pids}
-
+                'context_pids': ctx_pids, # this is for reader
+                'contexts': [self.corpus[pid] for pid in ctx_pids], # this is for reader 
+                'candidate_pids': self.candidate_pids[qid][:self.depth],} # this is for reranker
 
 @dataclass
 class ContextQACollator(DefaultDataCollator):
@@ -129,8 +150,6 @@ class ContextQACollator(DefaultDataCollator):
     max_src_length: Union[int] = 256
     max_tgt_length: Union[int] = 16
     pad_to_multiple_of: Optional[int] = None
-    # n_max_segments: Union[int] = 16 # should be done in dataset
-    # from model options
     num_mem_tokens: Union[int] = 16
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -152,7 +171,7 @@ class ContextQACollator(DefaultDataCollator):
         batch = {}
         batch_r = {}
         batch_size = len(features)
-        n_max_segments = len(features[0]['actions']) + 1 
+        n_max_segments = len(features[0]['actions'])
 
         # encode the initial request
         initial_q = self.tokenizer_r.batch_encode_plus(
@@ -163,12 +182,12 @@ class ContextQACollator(DefaultDataCollator):
             padding=self.padding,
             return_tensors='pt'
         )
-        batch_r['input_ids'] = [initial_q['input_ids']]
-        batch_r['attention_mask'] = [initial_q['attention_mask']]
+        batch_r['q_tokens'] = [initial_q['input_ids']]
+        batch_r['q_mask'] = [initial_q['attention_mask']]
 
-        # encode the action/followup text
-        ## encode the action segment-by-segment
-        for seg_num in range(n_max_segments - 1): # this should iterate over items
+        # encode the action/followup text segment-by-segment
+        ### this can stop appending when no additional segments (actions)
+        for seg_num in range(n_max_segments): 
             ### collect action for every batch first
             ### [NOTE] the empty string will return empty list
             batch_action_q = [ features[b]['actions'][seg_num] for b in range(batch_size) ]
@@ -180,25 +199,42 @@ class ContextQACollator(DefaultDataCollator):
                 padding=self.padding,
                 return_tensors='pt'
             )
-            batch_r['input_ids'].append(action_q['input_ids'])
-            batch_r['attention_mask'].append(action_q['attention_mask'])
+            batch_r['q_tokens'].append(action_q['input_ids'])
+            batch_r['q_mask'].append(action_q['attention_mask'])
+
+        # encode the candidate texts
+        d_tokens = []
+        d_mask = []
+        for b in range(batch_size):
+            contexts = self.tokenizer_r.batch_encode_plus(
+                [f"{c['title']} {c['text']}" for c in features[b]['contexts']],
+                add_special_tokens=True,
+                max_length=self.max_src_length,
+                truncation=self.truncation,
+                padding=self.padding,
+                return_tensors='pt'
+            )
+            d_tokens.append(contexts['input_ids'])
+            d_mask.append(contexts['attention_mask'])
+        batch_r['d_tokens'] = torch.stack(d_tokens)
+        batch_r['d_mask'] = torch.stack(d_mask)
+
+        action_q = self.tokenizer_r.batch_encode_plus(
+            batch_action_q,
+            add_special_tokens=True,
+            max_length=self.max_src_length,
+            truncation=self.truncation,
+            padding=self.padding,
+            return_tensors='pt'
+        )
 
         ## rewarding: (1) token adjustment (2) mask for calculating likelihood
-        ## Here should consider the decoder's input and output template
-        # targets = self.tokenizer_g.batch_encode_plus(
-        #     [", ".join(f['answers']) for f in features],  # maybe here can do sth, like ordering
-        #     max_length=self.max_tgt_length,
-        #     truncation=self.truncation,
-        #     padding=self.padding,
-        #     return_tensors='pt'
-        # )
         batch['question'] = [f['question'] for f in features] # R, Rprec
         batch['contexts'] = [f['contexts'] for f in features] # R, Rprec
         batch['answers'] = [f['answers'] for f in features] # R, Rprec
+        batch['targets'] = ["#".join(f['answers']) for f in features] # R, Rprec
         batch['pids'] = [f['pids'] for f in features] # evid-R, evid-Rprec
         batch['inputs_for_retriever'] = batch_r
-        # batch['labels'] = targets.input_ids  # done in model loop
-        # batch['decoder_attention_mask'] = targets.attention_mask 
         return batch
 
 
