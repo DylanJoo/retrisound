@@ -23,7 +23,7 @@ class ContextQADataset(Dataset):
         n_max_segments=10,
         n_max_candidates=50,
         depth=10,
-        budget=None,
+        budget=5,
         corpus_file=None,
         retrieval_file=None,
         quick_test=None
@@ -74,7 +74,7 @@ class ContextQADataset(Dataset):
         ## add context buffer count
         ## None means everything
         self.depth = depth
-        self.budget = (budget or depth)
+        self.budget = budget
 
     def _load_retrieval(self, file):
         self.candidate_pids = defaultdict(list)

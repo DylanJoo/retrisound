@@ -31,9 +31,6 @@ class InBatchInteraction(nn.Module):
         self.opt = opt
         self.q_encoder = q_encoder
         self.d_encoder = d_encoder if d_encoder is not None else copy.deepcopy(q_encoder)
-        if fixed_d_encoder:
-            for p in self.d_encoder.parameters():
-                p.requires_grad = False
 
         # distributed 
         # self.is_ddp = dist.is_initialized()

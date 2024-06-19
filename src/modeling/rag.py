@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 import copy
 from typing import Optional, Union, List, Dict, Tuple, Any
+from torch.nn import CrossEntropyLoss
 
 import random
 from dataclasses import dataclass
@@ -58,11 +59,10 @@ class RerankAugmentedGeneration(nn.Module):
         if inputs_for_retriever is not None:
             #### reranking by bi-encoders
             output_r = self.biencoders(**inputs_for_retriever)
-            loss_r = output_r.loss
             ## reorder/select documents
             contexts = []
             for candidate, ranking in zip(candidates, output_r.reranking):
-                context = [p for _, p in sorted(zip(ranking, candidate))]
+                context = [p for p, _ in sorted(zip(candidate, ranking))]
                 contexts.append(context[:k])
 
             # [TODO] this is the post-G actions
@@ -101,20 +101,42 @@ class RerankAugmentedGeneration(nn.Module):
             labels[i, :(s-1)] = -100
 
         ## step3. Generate with prompt (with context)
-        output_g = self.llm(**inputs, labels=labels)
+        output_g = self.llm(**inputs, labels=None)
 
-        # loss_ret = output_r.loss
-        loss_g = output_g.loss
-        logs = {'InfoNCE': loss_r, 'mle': loss_g}
+        ## verbose. it's slow
+        # output = self.llm.generate(**inputs)
+        # print(self.tokenizer.batch_decode(output))
+
+        loss_r = output_r.loss
+        # loss_g = output_g.loss # we will use loss from every example
+        loss_g = self.compute_nll(output_g.logits, labels)
+        logs = {'InfoNCE': loss_r, 'mle': loss_g.mean()}
 
         ## computing additional alignment loss
         # KLLoss = nn.KLDivLoss(reduction='batchmean')
         return RAGOutput(
-            loss=loss_r+loss_g,
+            loss=loss_r+loss_g.mean(),
             loss_r=loss_r,
             loss_g=loss_g,
             loss_kl=None
         )
+
+    def compute_nll(self, logits, labels):
+        ## extract the batch-wise mean
+        batch_size, _, vocab_size = logits.shape
+        # Shift so that tokens < n predict n
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        # Flatten the tokens
+        loss_fct = CrossEntropyLoss(reduction='none')
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits, shift_labels)
+        loss = loss.view(batch_size, -1).mean(-1)
+        return loss
+
 
 class RetrievalAugmentedGeneration():
 

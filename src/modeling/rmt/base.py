@@ -17,9 +17,13 @@ class RMTBaseModel(torch.nn.Module):
         if 'sep_token' in tokenizer.special_tokens_map:
             self.segment_size -= 1
 
-    def set_memory(self, input_shape):
+    def set_memory(self, input_shape, device=None):
         embeddings = self.model.get_input_embeddings()
-        memory = embeddings(self.mem_token_ids)
+        # memory = embeddings(self.mem_token_ids)
+        if device is not None:
+            memory = embeddings(self.mem_token_ids.to(device))
+        else:
+            memory = embeddings(self.mem_token_ids)
         memory = memory.repeat(input_shape[0], 1, 1)
         return memory
 

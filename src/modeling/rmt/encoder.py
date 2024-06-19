@@ -38,7 +38,7 @@ class RMTEncoder(RMTBaseModel):
             attention_mask = [attention_mask]
 
         # use the first input_ids to setup memory
-        memory = self.set_memory(input_ids[0].shape)
+        memory = self.set_memory(input_ids[0].shape, device=input_ids[0].device)
 
         ## split long input into n_max_semgents shorter inputs
         ## Also, the memory tokens are ready for each segments
@@ -83,9 +83,7 @@ class RMTEncoder(RMTBaseModel):
             else:
                 ada_hidden_state[non_empty_mask] = self.adaptive_pooling(out)
 
-            # print(ada_hidden_state)
             ## log outputs and ada_hidden_state
-            # base_model_outputs.append(out)
             ada_embeds.append(ada_hidden_state.clone())
 
         return RMTEncoderOutput(
@@ -113,9 +111,11 @@ class RMTEncoder(RMTBaseModel):
         batch_size = tensors.shape[0]
 
         pre = torch.cat([self.cls_token, self.mem_token_ids, self.sep_token]).repeat((batch_size, 1))
+        pre = pre.to(tensors.device)
         tensors_ = torch.cat([pre, tensors[:, 1:]], dim=1)
 
         pre = torch.ones( (batch_size, pre.size(1)), dtype=torch.long )
+        pre = pre.to(tensors.device)
         masks_ = torch.cat([pre, masks[:, 1:]], dim=1)
         return tensors_, masks_
 

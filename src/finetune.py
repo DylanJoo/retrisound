@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 import json
 from dataclasses import asdict
+from copy import deepcopy
 
 import transformers
 from transformers import (
@@ -33,13 +34,15 @@ from utils import init_tokenizer
 
 logger = get_logger(__name__)
 
+
 def main():
+
 
     from options import ModelOptions, DataOptions, TrainOptions
     parser = HfArgumentParser((ModelOptions, DataOptions, TrainOptions))
     model_opt, data_opt, train_opt = parser.parse_args_into_dataclasses()
 
-    os.environ["WANDB_PROJECT"] = (train_opt.wandb_project or 'testing')
+    os.environ["WANDB_PROJECT"] = train_opt.wandb_project
 
     # [Accelerator] 
     accelerator_log_kwargs = {}
@@ -72,18 +75,20 @@ def main():
             os.makedirs(train_opt.output_dir, exist_ok=True)
 
     accelerator.wait_for_everyone()
+    # from transformers import AutoModel
+    # test = AutoModel.from_pretrained('bert-base-uncased', torch_dtype=torch.float16)
+    # print(test.embeddings.word_embeddings)
+    # print(test.embeddings.word_embeddings.weight)
 
     # [Retriever Bi-encoder]
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     from modeling.rmt import RMTEncoder
     from modeling.rife import Contriever
-    model = Contriever.from_pretrained(model_opt.retriever_name_or_path)
-    encoder = deepcopy(model)
     ada_encoder = RMTEncoder(
-        base_model=model, 
+        base_model=Contriever.from_pretrained(model_opt.retriever_name_or_path),
         tokenizer=tokenizer_r,
         num_mem_tokens=model_opt.num_mem_tokens,
-        max_n_segments=train_opt.max_n_segments,
+        n_max_segments=train_opt.n_max_segments,
         input_size=(256-model_opt.num_mem_tokens-3),
         sum_loss=False,
     )
@@ -91,7 +96,7 @@ def main():
     bi_encoders = InBatchInteraction(
         model_opt,
         q_encoder=ada_encoder,
-        d_encoder=encoder
+        d_encoder=Contriever.from_pretrained(model_opt.retriever_name_or_path),
         fixed_d_encoder=True
     )
 
@@ -104,27 +109,30 @@ def main():
     tokenizer_g, _= init_tokenizer(tokenizer_g, model_opt.use_special_tokens)
     config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
     generator = AutoModelForCausalLM.from_pretrained(
-        model_opt.model_name_or_path,
+        model_opt.generator_name_or_path,
         config=config,
         low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
-        attn_implementation=train_opt.attn_implementation, 
+        attn_implementation=model_opt.attn_implementation, 
     )
     # We resize the embeddings only when necessary to avoid index errors. 
     # If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
-    embedding_size = model.llm.get_input_embeddings().weight.shape[0]
-    if len(tokenizer) > embedding_size:
-        model.llm.resize_token_embeddings(len(tokenizer))
+    embedding_size = generator.get_input_embeddings().weight.shape[0]
+    if len(tokenizer_g) > embedding_size:
+        generator.resize_token_embeddings(len(tokenizer_g))
 
     # [RAG]
-    from rag import RerankAugmentedGeneration
+    from modeling import RerankAugmentedGeneration
     model = RerankAugmentedGeneration(
         llm=generator,
-        tokenizer=tokenizer,
+        tokenizer=tokenizer_g,
         biencoders=bi_encoders
     )
     if train_opt.gradient_checkpointing:
-        model.gradient_checkpointing_enable()
+        model.biencoders.q_encoder.model.gradient_checkpointing_enable()
+        model.biencoders.d_encoder.gradient_checkpointing_enable()
+        model.llm.gradient_checkpointing_enable()
+
 
     # [Data]
     from data.qampari import ContextQADataset, ContextQACollator
@@ -132,14 +140,15 @@ def main():
         data_file=data_opt.train_file, 
         n_max_segments=train_opt.n_max_segments,
         n_max_candidates=train_opt.n_max_candidates,
+        budget=model_opt.budget,
+        depth=data_opt.depth,
         corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
-        quick_test=True
+        quick_test=train_opt.quick_test
     )
-    logger.info(f"Sample {index}: {train_dataset[0]}.")
-    logger.info(f"Sample {index}: {train_dataset[2]}.")
+    logger.info(f"Sample 0: {train_dataset[0]}.")
+    logger.info(f"Sample 1: {train_dataset[1]}.")
     # eval_dataset = ContextQADataset(data_opt.eval_file)
-    ## load corpus: TBD
 
     # [Data] dataloader with collator
     ## [TODO] add sampler by action size (e.g., less to more)
@@ -154,18 +163,32 @@ def main():
         batch_size=train_opt.per_device_train_batch_size,
     )
 
+
     # [optimizer] Split weights in two groups, one with weight decay and the other not.
     no_decay = ["bias", "layer_norm.weight"]
+    # optimizer_grouped_parameters = [
+    #     {
+    #         "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) ],
+    #         "weight_decay": train_opt.weight_decay,
+    #     },
+    #     {
+    #         "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) ],
+    #         "weight_decay": 0.0,
+    #     },
+    # ]
     optimizer_grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "params": [p for n, p in model.named_parameters() if p.requires_grad and not any(nd in n for nd in no_decay) ],
             "weight_decay": train_opt.weight_decay,
         },
         {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+            "params": [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay) ],
             "weight_decay": 0.0,
         },
     ]
+
+    freezed = ['llm', 'd_encoder']
+
     optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=train_opt.learning_rate)
 
     ## [Optimizer] calculate maximum steps 
@@ -183,16 +206,20 @@ def main():
         num_warmup_steps=int(num_training_steps_for_scheduler * train_opt.warmup_ratio),
     )
 
+    ## [NOTE] here is a bit tricky, use 'auto' would be ideal
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    for n, p in model.named_parameters():
+        if p.requires_grad:
+            logger.info(n)
 
     ## Recalculate maximum steps (bc of accelerator may change loader)
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / train_opt.gradient_accumulation_steps)
     if overrode_max_steps:
         train_opt.max_steps = train_opt.num_train_epochs * num_update_steps_per_epoch
     train_opt.num_train_epochs = math.ceil(train_opt.max_steps / num_update_steps_per_epoch)
-    # logger.info(f"{train_opt.num_train_epochs} | {train_opt.max_steps}" )
+    logger.info(f"{train_opt.num_train_epochs} | {train_opt.max_steps}" )
 
     if train_opt.with_tracking:
         experiment_config = asdict(train_opt)
@@ -211,7 +238,7 @@ def main():
     logger.info(f"  Gradient Accumulation steps = {train_opt.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {train_opt.max_steps}")
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(int(train_opt.max_steps)), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(range(int(train_opt.max_steps)), disable=not accelerator.is_main_process)
     completed_steps = 0
     starting_epoch = 0
 
@@ -303,12 +330,12 @@ def main():
     if train_opt.output_dir is not None:
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
-            tokenizer.save_pretrained(train_opt.output_dir)
+            tokenizer_r.save_pretrained(train_opt.output_dir)
         unwrapped_model = accelerator.unwrap_model(model)
         # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
         # Otherwise, sometimes the model will be saved with only part of the parameters.
         # Also, accelerator needs to use the wrapped model to get the state_dict.
-        state_dict = accelerator.get_state_dict(model)
+        state_dict = accelerator.get_state_dict(model.biencoders.q_encoder)
         unwrapped_model.save_pretrained(
             train_opt.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
         )

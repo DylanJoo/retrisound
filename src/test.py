@@ -43,15 +43,12 @@ generator = AutoModelForCausalLM.from_pretrained(
         # attn_implementation="flash_attention_2"
 
 tokenizer_g = AutoTokenizer.from_pretrained(G_model_name_or_path)
-from rag import RerankAugmentedGeneration
+from modeling import RerankAugmentedGeneration
 model = RerankAugmentedGeneration(
         llm=generator, 
         tokenizer=tokenizer_g,
         biencoders=bi_encoders,
 )
-# for n, p in model.named_parameters():
-#     if p.requires_grad:
-#         print(n)
 
 ## add data
 split='test'
@@ -70,7 +67,6 @@ dataset = ContextQADataset(
 dataset.add_action(0, 'this is a testing action')
 
 features = [dataset[i] for i in range(4)]
-print(features)
 from data.qampari import ContextQACollator
 collator = ContextQACollator(
     tokenizer_r=tokenizer_r,
@@ -79,4 +75,4 @@ collator = ContextQACollator(
 d=collator(features)
 print(d['inputs_for_retriever'])
 o=model(**d)
-print(o.loss)
+print(o.loss_g)
