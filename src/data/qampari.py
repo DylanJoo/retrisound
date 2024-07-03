@@ -13,7 +13,8 @@ from transformers.tokenization_utils_base import (
     PreTrainedTokenizerBase,
     PaddingStrategy, 
 )
-from .utils import load_corpus_file
+from .utils import load_corpus_file # normal use case
+# from utils import load_corpus_file # for unit test
 
 class ContextQADataset(Dataset):
 
@@ -42,7 +43,7 @@ class ContextQADataset(Dataset):
                 data.append(json.loads(line.strip()))
 
         if quick_test is not None:
-            data = data[:16]
+            data = data[:9]
 
         self.length = len(data)
         self.n_max_segments = n_max_segments
@@ -77,14 +78,17 @@ class ContextQADataset(Dataset):
         self.budget = budget
 
     def _load_retrieval(self, file):
+        """
+        [NOTE] Here we will do additional preprocess. 
+        We only keep the discard the passage
+        """
         self.candidate_pids = defaultdict(list)
-        empty = {'text': "", 'title': ""}
         with open(file, 'r') as f:
             for line in tqdm(f):
                 qid, _, docid, rank, score, _ = line.strip().split()
                 if int(rank) <= self.n_max_candidates:
                     self.candidate_pids[qid].append(docid)
-                    self.corpus[docid] = empty
+                    self.corpus[docid] = {'text': "", 'title': ""}
                     # remove this if `_load_corpus` doesn't need to predefine
 
     def _load_corpus(self, dir):
@@ -99,7 +103,7 @@ class ContextQADataset(Dataset):
                     self.corpus[docid].update(docdict)
                 except:
                     continue
-                    # not in the retrieved budget
+                    # raiseKeyError as it's not in the retrieved budget
 
     def _build(self, data):
         for idx in range(self.length):
@@ -111,7 +115,8 @@ class ContextQADataset(Dataset):
 
                 for proof in answer['proof']:
                     self.proof[idx].append(proof['proof_text'])
-                    self.gold_context[idx].append(proof['pid']) # this is not actually the chunk_id for corpus
+                    self.gold_context[idx].append(proof['pid']) 
+                    # this is not actually the chunk_id for corpus
 
     def __len__(self):
         return len(self.questions)
@@ -135,7 +140,8 @@ class ContextQADataset(Dataset):
         qid = self.qids[idx]
         # ctx_pids = self.context_pids[idx][:self.budget] # can be qid or idx
         cand_pids = self.candidate_pids[qid][:self.budget] # can be qid or idx
-        return {'question': self.questions[idx], 
+        return {'index': idx,
+                'question': self.questions[idx], 
                 'actions': self.actions[idx],
                 'answers': self.answer_list[idx],
                 'candidate_pids': cand_pids, 
@@ -182,6 +188,7 @@ class ContextQACollator(DefaultDataCollator):
             padding=self.padding,
             return_tensors='pt'
         )
+        # batch_r['q_texts'] = [[f['question'] for f in features]]
         batch_r['q_tokens'] = [initial_q['input_ids']]
         batch_r['q_mask'] = [initial_q['attention_mask']]
 
@@ -199,6 +206,7 @@ class ContextQACollator(DefaultDataCollator):
                 padding=self.padding,
                 return_tensors='pt'
             )
+            # batch_r['q_texts'].append(batch_action_q)
             batch_r['q_tokens'].append(action_q['input_ids'])
             batch_r['q_mask'].append(action_q['attention_mask'])
 
@@ -207,6 +215,7 @@ class ContextQACollator(DefaultDataCollator):
         batch_r['d_tokens'] = []
         batch_r['d_mask'] = []
         for ctx in range(candidate_size):
+            # [NOTE] Could be possible to separate title and text
             candidate = self.tokenizer_r.batch_encode_plus(
                 [f"{features[b]['candidates'][ctx]['title']} {features[b]['candidates'][ctx]['text']}" for b in range(batch_size)],
                 add_special_tokens=True,
@@ -219,6 +228,7 @@ class ContextQACollator(DefaultDataCollator):
             batch_r['d_mask'].append(candidate['attention_mask'])
 
         ## rewarding: (1) token adjustment (2) mask for calculating likelihood
+        batch['index'] = [f['index'] for f in features] # we record it 
         batch['question'] = [f['question'] for f in features] 
         batch['targets'] = ["#".join(f['answers']) for f in features] 
         batch['candidates'] = [f['candidates'] for f in features] 

@@ -13,11 +13,8 @@ dataset = ContextQADataset(
     quick_test=True
 )
 # add action for index 0
-dataset.add_action(0, 'this is a testing action')
+dataset.add_action(0, 'this is 0 testing action (next)')
 # print(dataset[0])
-
-features = [dataset[i] for i in range(4)]
-print(features)
 
 from qampari import ContextQACollator
 from transformers import AutoTokenizer
@@ -27,7 +24,19 @@ collator = ContextQACollator(
     tokenizer_r=tokenizer_r,
     tokenizer_g=tokenizer_g
 )
-
+features = [dataset[i] for i in range(4)]
 d=collator(features)
-print(d.keys())
+print(d['inputs_for_retriever'].keys())
+
+from torch.utils.data import DataLoader
+loader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=collator)
+
+for b in loader:
+    print(b['inputs_for_retriever']['q_texts'])
+    dataset.add_action(0, f'this is 0 testing action')
+    dataset.add_action(1, f'this is 1 testing action')
+    dataset.add_action(2, f'this is 2 testing action')
+    dataset.add_action(3, f'this is 3 testing action')
+    dataset.add_action(4, f'this is 4 testing action')
+    dataset.add_action(5, f'this is 5 testing action')
 

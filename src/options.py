@@ -1,7 +1,7 @@
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Optional, Union, Tuple
+from typing import Optional, Union, Tuple, Literal
 from transformers import TrainingArguments
 
 @dataclass
@@ -17,7 +17,7 @@ class ModelOptions:
     fixed_d_encoder: Optional[bool] = field(default=False)
     num_mem_tokens: Optional[int] = field(default=16)
     budget: Optional[int] = field(default=5)
-    attn_implementation: str = field(default=None)
+    attn_implementation: Literal[None, 'sdpa', 'flash_attention_2'] = field(default=None)
 
 @dataclass
 class DataOptions:
