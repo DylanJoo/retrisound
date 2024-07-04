@@ -58,7 +58,11 @@ class RMTEncoder(RMTBaseModel):
             segment_attention_mask = attention_mask[seg_num]
             non_empty_mask = [len(s) > 2 for s in segment_input_ids]
             if sum(non_empty_mask) == 0:
+                # print('jump', seg_num)
                 continue # skip this loop if all are empty
+            else:
+                pass
+                # print('keep', seg_num)
 
             ## expand input_ids with memory and special tokens
             segment_input_ids, segment_attention_mask = self.add_special_tokens_and_masks(
