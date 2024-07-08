@@ -1,5 +1,6 @@
 from collections import defaultdict
 import json
+# from tqdm import tqdm
 
 def load_corpus_file(file):
     corpus = defaultdict(dict)

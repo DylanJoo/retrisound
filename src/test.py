@@ -5,7 +5,8 @@ from options import ModelOptions, TrainOptions
 
 ## prepare kwargs
 R_model_name_or_path='facebook/contriever'
-G_model_name_or_path='TinyLlama/TinyLlama-1.1B-Chat-v1.0'
+# G_model_name_or_path='TinyLlama/TinyLlama-1.1B-Chat-v1.0'
+G_model_name_or_path='meta-llama/Meta-Llama-3-8B-Instruct'
 model_opt = ModelOptions(
         retriever_name_or_path=R_model_name_or_path,
         generator_name_or_path=G_model_name_or_path,
@@ -34,20 +35,35 @@ bi_encoders = InBatchInteraction(
 )
 
 ## prepare generator
-config = AutoConfig.from_pretrained(G_model_name_or_path)
-generator = AutoModelForCausalLM.from_pretrained(
-        G_model_name_or_path,
-        config=config,
-        low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
-)
-        # attn_implementation="flash_attention_2"
+tokenizer_g = AutoTokenizer.from_pretrained(G_model_name_or_path, use_fast=False)
 
-tokenizer_g = AutoTokenizer.from_pretrained(G_model_name_or_path)
+### [FIX] missing pad token
+### Regarding `forward` passing, llama3 include the pad token to achieve batch forward. However, the original pre-traing did not use pad. We here add a pseudo pad token (and you should ignore the loss from the MLE of them)
+if tokenizer_g.pad_token is None:
+    tokenizer_g.add_special_tokens(
+        {'pad_token': '<|reserved_special_token_0|>'}
+    )
+
+stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>"]
+stop_token_ids = [tokenizer_g.eos_token_id] + [tokenizer_g.convert_tokens_to_ids(token) for token in stop]
+stop_token_ids = list(set([token_id for token_id in stop_token_ids if token_id is not None]))
+# tokenizer_g.eos_token_id = stop_token_ids
+generator = AutoModelForCausalLM.from_pretrained(
+    G_model_name_or_path,
+    low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
+    pad_token_id=tokenizer_g.eos_token_id
+)
+
+### Resize embeds as long as pad token is out-of-vocab.
+# if len(tokenizer_g) > generator.get_input_embeddings().weight.shape[0]:
+#     model.resize_token_embeddings(len(tokenizer_g))
+
 from modeling import RerankAugmentedGeneration
 model = RerankAugmentedGeneration(
-        llm=generator, 
-        tokenizer=tokenizer_g,
-        biencoders=bi_encoders,
+    llm=generator, 
+    tokenizer=tokenizer_g,
+    biencoders=bi_encoders,
+    stop_token_ids=stop_token_ids
 )
 
 ## add data
@@ -59,11 +75,10 @@ dataset = ContextQADataset(
     n_max_candidates=50,
     budget=5,
     depth=10,
-    corpus_file=None,
+    corpus_file='/home/dju/datasets/qampari/wikipedia_chunks/chunks_v5',
     retrieval_file=f'/home/dju/datasets/qampari/{split}_data_bm25-top100.run',
     quick_test=True
 )
-    # corpus_file='/home/dju/datasets/qampari/wikipedia_chunks/chunks_v5',
 dataset.add_action(0, 'this is a testing action')
 
 features = [dataset[i] for i in range(4)]
@@ -73,6 +88,13 @@ collator = ContextQACollator(
     tokenizer_g=tokenizer_g
 )
 d=collator(features)
-print(d['inputs_for_retriever'])
+# print(d['inputs_for_retriever'])
 o=model(**d)
-print(o.loss_g)
+# print(o.keys())
+# print(o.loss_g)
+
+print(o.prompts_fbk[0])
+for i, fbk in enumerate(o.feedbacks):
+    print('q,', dataset[i]['question'])
+    print('a,', dataset[i]['answers'])
+    print('fbk,', fbk)

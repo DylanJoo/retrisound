@@ -87,11 +87,6 @@ class InBatchInteraction(nn.Module):
         r_ranking = 1/(alpha + 1 + (-scores).argsort(-1)) # reciprocal
         reranking = r_ranking.sum(-2).argsort(-1) # B N_cand
 
-        # if self.is_ddp:
-        #     gather_fn = gather
-        #     ranking = gather_fn(ranking)
-        #     data_index = gather_fn(data_index).detach().cpu().numpy().tolist()
-
         ## 2) constrastive learning
         ### q <- qembs[:, 0, :] B (1) H. the first segment
         ### d <- dembs[:, 0, :] B (1) H. the first context (would change)
@@ -104,8 +99,11 @@ class InBatchInteraction(nn.Module):
             gather_fn = gather
             demb_ibn = gather_fn(demb_ibn)
 
-        labels = torch.arange(0, qemb_ibn.size(0), dtype=torch.long, 
-                              device=qemb_ibn.device)
+        labels = torch.arange(
+            0, qemb_ibn.size(0), 
+            dtype=torch.long, 
+            device=qemb_ibn.device
+        )
 
         rel_scores = torch.einsum("id, jd->ij", qemb_ibn/self.tau, demb_ibn)
 

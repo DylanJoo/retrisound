@@ -1,4 +1,4 @@
-name: rag
+name: retrisound
 channels:
   - conda-forge
   - defaults
@@ -85,6 +85,7 @@ dependencies:
   - zlib=1.2.13=hd590300_5
   - zstd=1.5.5=hfc55251_0
   - pip:
+      - absl-py==2.1.0
       - accelerate==0.28.0
       - aiohttp==3.9.3
       - aiosignal==1.3.1
@@ -93,6 +94,7 @@ dependencies:
       - appdirs==1.4.4
       - async-timeout==4.0.3
       - attrs==23.2.0
+      - bitsandbytes==0.43.1
       - blis==0.7.11
       - catalogue==2.0.10
       - certifi==2024.2.2
@@ -114,12 +116,14 @@ dependencies:
       - distro==1.9.0
       - dnspython==2.6.1
       - docker-pycreds==0.4.0
+      - einops==0.8.0
       - email-validator==2.1.1
       - exceptiongroup==1.2.0
       - faiss-cpu==1.8.0
       - fastapi==0.111.0
       - fastapi-cli==0.0.4
       - filelock==3.13.1
+      - flash-attn==2.5.9.post1
       - flatbuffers==24.3.7
       - fonttools==4.49.0
       - frozenlist==1.4.1
@@ -209,6 +213,7 @@ dependencies:
       - regex==2023.12.25
       - requests==2.31.0
       - rich==13.7.1
+      - rouge-score==0.1.2
       - rpds-py==0.18.1
       - safetensors==0.4.2
       - scikit-learn==1.4.1.post1
@@ -255,4 +260,4 @@ dependencies:
       - xformers==0.0.26.post1
       - xxhash==3.4.1
       - yarl==1.9.4
-prefix: /home/dju/miniconda3/envs/rag
+prefix: /home/dju/miniconda3/envs/retrisound

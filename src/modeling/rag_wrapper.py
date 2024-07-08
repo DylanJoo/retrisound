@@ -28,13 +28,12 @@ class RAGOutput(BaseModelOutput):
 
 class RerankAugmentedGeneration(nn.Module):
 
-    def __init__(self, llm, tokenizer, biencoders=None, stop_token_ids=[], k=5):
+    def __init__(self, llm, tokenizer, biencoders=None, stop_token_ids=[]):
         super().__init__()
         self.llm = llm
         self.tokenizer = tokenizer
         self.biencoders = biencoders # could be inbatch
         self.stop_token_ids = stop_token_ids # could be inbatch
-        self.k = k
 
         # freeze G and R's d-encoder
         for p in self.llm.parameters():
@@ -49,6 +48,7 @@ class RerankAugmentedGeneration(nn.Module):
         questions: List[str],
         targets: List[str] = None,
         candidates: Optional[List[List[Dict]]] = None,
+        k: int = 5,
         inputs_for_retriever: Optional[Dict] = None,
         **kwargs
     ):
@@ -79,14 +79,14 @@ class RerankAugmentedGeneration(nn.Module):
             contexts = []
             for candidate, ranking in zip(candidates, output_r.reranking):
                 context = [p for _, p in sorted(zip(ranking, candidate))]
-                contexts.append(context[:self.k])
+                contexts.append(context[:k])
 
             # [TODO] add post-G actions 
             # retrieved_pids = dosomething(output_r.scores)
             # updated_pids = dosomething(retrieved_pids, pids)
             # passages = [corpus[pid] for pid in updated_pids]
         else:
-            contexts = [ctx[:self.k] for ctx in candidates]
+            contexts = [ctx[:k] for ctx in candidates]
 
         ## step2. prepare prompt of context for generation
         ## [TODO] cleaner to move this section to another function
@@ -99,7 +99,7 @@ class RerankAugmentedGeneration(nn.Module):
                 Q=questions[i], 
                 D=D,
                 instruction=instruction_prompt,
-                prefix="Answer:"
+                add_prefix=True
             ).replace('{DEMO}', '')
             prompts.append(prompt)
 
@@ -177,12 +177,6 @@ class RerankAugmentedGeneration(nn.Module):
             prompts_fbk=prompts_fbk,
             feedbacks=feedbacks
         )
-
-    def gradient_checkpointing_enable(self, **kwargs):
-        self.biencoders.q_encoder.model.gradient_checkpointing_enable(**kwargs)
-        self.biencoders.d_encoder.gradient_checkpointing_enable(**kwargs)
-        self.llm.gradient_checkpointing_enable(**kwargs)
-
     def compute_nll(self, logits, labels):
         ## extract the batch-wise mean
         batch_size, _, vocab_size = logits.shape

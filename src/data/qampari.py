@@ -43,7 +43,7 @@ class ContextQADataset(Dataset):
                 data.append(json.loads(line.strip()))
 
         if quick_test is not None:
-            data = data[:9]
+            data = data[:quick_test]
 
         self.length = len(data)
         self.n_max_segments = n_max_segments
@@ -94,7 +94,7 @@ class ContextQADataset(Dataset):
     def _load_corpus(self, dir):
         from multiprocessing import Pool
         files = glob(f'{dir}/*jsonl')
-        with Pool(16) as pool:
+        with Pool(processes=16, maxtasksperchild=1024) as pool:
             corpora = pool.map(load_corpus_file, files)
 
         for corpus in tqdm(corpora):
@@ -141,7 +141,7 @@ class ContextQADataset(Dataset):
         # ctx_pids = self.context_pids[idx][:self.budget] # can be qid or idx
         cand_pids = self.candidate_pids[qid][:self.budget] # can be qid or idx
         return {'index': idx,
-                'question': self.questions[idx], 
+                'questions': self.questions[idx], 
                 'actions': self.actions[idx],
                 'answers': self.answer_list[idx],
                 'candidate_pids': cand_pids, 
@@ -181,7 +181,7 @@ class ContextQACollator(DefaultDataCollator):
 
         # encode the initial request
         initial_q = self.tokenizer_r.batch_encode_plus(
-            [f['question'] for f in features],
+            [f['questions'] for f in features],
             add_special_tokens=True,
             max_length=self.max_src_length,
             truncation=self.truncation,
@@ -229,13 +229,12 @@ class ContextQACollator(DefaultDataCollator):
 
         ## rewarding: (1) token adjustment (2) mask for calculating likelihood
         batch['index'] = [f['index'] for f in features] # we record it 
-        batch['question'] = [f['question'] for f in features] 
-        batch['targets'] = ["#".join(f['answers']) for f in features] 
+        batch['questions'] = [f['questions'] for f in features] 
+        batch['targets'] = [",".join(f['answers']) for f in features] 
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
         # evid-R, evid-Rprec
         batch['answers'] = [f['answers'] for f in features] 
-        # evid-R, evid-Rprec
         batch['candidate_pids'] = [f['candidate_pids'] for f in features] 
         return batch
 

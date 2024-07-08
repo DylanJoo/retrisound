@@ -104,18 +104,17 @@ def main():
     from utils import update_tokenizer
     tokenizer_g = AutoTokenizer.from_pretrained(
             model_opt.generator_name_or_path, 
+            padding_side='right', # and we have to ignore the padding
             use_fast=True
     )
-    tokenizer_g = update_tokenizer(
-        tokenizer_g, '<|reserved_special_token_0|>'
-    )
+    tokenizer_g = update_tokenizer(tokenizer_g, '<|reserved_special_token_0|>')
     config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
     generator = AutoModelForCausalLM.from_pretrained(
         model_opt.generator_name_or_path,
         config=config,
         low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
         attn_implementation=model_opt.attn_implementation, 
-    )
+    ).eval()
 
     stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
     stop_token_ids = [tokenizer_g.eos_token_id] + [tokenizer_g.convert_tokens_to_ids(token) for token in stop]
@@ -127,7 +126,8 @@ def main():
         llm=generator,
         tokenizer=tokenizer_g,
         biencoders=bi_encoders,
-        stop_token_ids=stop_token_ids
+        stop_token_ids=stop_token_ids,
+        k=model_opt.num_contexts
     )
     ## the parameters freezed
     if train_opt.gradient_checkpointing:
@@ -138,7 +138,7 @@ def main():
     # [Data]
     from data.qampari import ContextQADataset, ContextQACollator
     ## [NOTE] execute multithread once and wait
-    if accelerator.is_local_main_process:
+    with accelerator.main_process_first():
         train_dataset = ContextQADataset(
             data_file=data_opt.train_file, 
             n_max_segments=train_opt.n_max_segments,
@@ -152,7 +152,6 @@ def main():
         logger.info(f"Sample 0: {train_dataset[0]}.")
         logger.info(f"Sample 1: {train_dataset[1]}.")
 
-    accelerator.wait_for_everyone()
     # eval_dataset = ContextQADataset(data_opt.eval_file)
 
     # [Data] dataloader with collator
@@ -266,6 +265,8 @@ def main():
     for epoch in range(starting_epoch, train_opt.num_train_epochs):
         model.train()
         total_loss = 0
+        total_loss_r = 0
+        total_loss_g = 0
         for step, batch in enumerate(train_dataloader):
             # We need to skip steps until we reach the resumed step
             if train_opt.resume_from_checkpoint and epoch == starting_epoch:
@@ -292,6 +293,8 @@ def main():
                         train_dataset.add_action(idx, feedbacks[i])
 
                 # We keep track of the loss at each logged step
+                total_loss_r += outputs.loss_r.detach().float()
+                total_loss_g += outputs.loss_g.detach().float()
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
                 optimizer.step()
@@ -299,8 +302,8 @@ def main():
                 lr_scheduler.step()       
 
                 ### [TODO] feeback updated on the fly
-                for i, feedback in feedbacks:
-                    train_dataset.add_action(batch['index'][i], feedback)
+                for i, feedback in enumerate(feedbacks):
+                    train_dataset.add_action(indices[i], feedback)
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -309,16 +312,22 @@ def main():
 
                 if train_opt.logging_steps and completed_steps % train_opt.logging_steps == 0:
                     avg_loss = accelerator.gather(total_loss).mean().item() / train_opt.gradient_accumulation_steps / train_opt.logging_steps
+                    avg_loss_r = accelerator.gather(total_loss_r).mean().item() / train_opt.gradient_accumulation_steps / train_opt.logging_steps
+                    avg_loss_g = accelerator.gather(total_loss_g).mean().item() / train_opt.gradient_accumulation_steps / train_opt.logging_steps
                     logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
                     if train_opt.with_tracking:
                         accelerator.log(
                             {
                                 "learning_rate": lr_scheduler.get_last_lr()[0],
                                 "train_loss": avg_loss,
+                                "train_loss_r": avg_loss_r,
+                                "train_loss_g": avg_loss_g,
                             },
                             step=completed_steps,
                         )
                     total_loss = 0
+                    total_loss_r = 0
+                    total_loss_g = 0
                     
                 if train_opt.save_strategy == 'steps':
                     if completed_steps % train_opt.save_steps == 0:
@@ -346,9 +355,14 @@ def main():
         # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
         # Otherwise, sometimes the model will be saved with only part of the parameters.
         # Also, accelerator needs to use the wrapped model to get the state_dict.
-        state_dict = accelerator.get_state_dict(model.biencoders.q_encoder)
-        unwrapped_model.save_pretrained(
-            train_opt.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
+        # state_dict = accelerator.get_state_dict(model.biencoders.q_encoder.model)
+        # unwrapped_model.save_pretrained(
+        #     train_opt.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
+        # )
+        # [NOTE] Since we only tuned bi-encoder's q-encoder
+        unwrapped_model.biencoders.q_encoder.model.save_pretrained(
+            train_opt.output_dir, 
+            is_main_process=accelerator.is_main_process
         )
 
 if __name__ == '__main__':
