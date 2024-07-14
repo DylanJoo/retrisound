@@ -63,7 +63,7 @@ class InBatchInteraction(nn.Module):
         dembs = []
         for i in range(len(d_tokens)):
             demb = self.d_encoder(
-                input_ids=d_tokens[i],
+                input_ids=d_tokens[i], 
                 attention_mask=d_mask[i]
             ).emb  # B H
             dembs.append(demb)

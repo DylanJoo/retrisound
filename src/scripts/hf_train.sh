@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --time=05:00:00
+#SBATCH --time=48:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -24,7 +24,8 @@ TOTAL_BATCH_SIZE=16
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
-BASE_RET=facebook/contriever
+# BASE_RET=facebook/contriever
+BASE_RET=facebook/contriever-msmarco
 
 MODEL_SIZE=7B
 BASE_LLM=meta-llama/Meta-Llama-3-8B-Instruct
@@ -46,7 +47,7 @@ deepspeed --num_gpus $NUM_GPUS hf_finetune.py \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 5e-5 \
     --lr_scheduler_type linear \
-    --warmup_ratio 0.03 \
+    --warmup_ratio 0.1 \
     --weight_decay 0. \
     --num_train_epochs 1 \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
@@ -55,5 +56,6 @@ deepspeed --num_gpus $NUM_GPUS hf_finetune.py \
     --wandb_project retrisound \
     --quick_test 5000 \
     --max_steps 5000 \
+    --save_steps 1000 \
     --logging_steps 1
 

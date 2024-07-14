@@ -116,9 +116,8 @@ def main():
     )
 
     # Train!
-    ## [train] SFT config
-    from trainer import RLTrainer
-    trainer = RLTrainer(
+    from trainer import IRTrainer
+    trainer = IRTrainer(
         model=model,
         tokenizer=tokenizer_g,
         train_dataset=train_dataset,

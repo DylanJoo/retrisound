@@ -181,7 +181,7 @@ class RerankAugmentedGeneration(nn.Module):
     def gradient_checkpointing_enable(self, **kwargs):
         self.biencoders.q_encoder.model.gradient_checkpointing_enable(**kwargs)
         self.biencoders.d_encoder.gradient_checkpointing_enable(**kwargs)
-        self.llm.gradient_checkpointing_enable(**kwargs)
+        # self.llm.gradient_checkpointing_enable(**kwargs)
 
     def compute_nll(self, logits, labels):
         ## extract the batch-wise mean

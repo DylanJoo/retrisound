@@ -5,15 +5,22 @@ import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from trl import RewardTrainer
-from transformers import PreTrainedModel, get_scheduler
-from transformers.utils import logging 
+# from trl import RewardTrainer
+from transformers import PreTrainedModel, get_scheduler, Trainer
+from transformers.utils import logging, is_peft_available
+
+if is_peft_available():
+    from peft import PeftModel
+if is_safetensors_available():
+    import safetensors.torch
+
+from transformers.modeling_utils import unwrap_model
 
 from prompt.qampari import *
 logging.set_verbosity_info()
 logger = logging.get_logger("transformers")
 
-class RLTrainer(RewardTrainer):
+class IRTrainer(Trainer):
 
     def compute_loss(
         self,
@@ -30,6 +37,7 @@ class RLTrainer(RewardTrainer):
         targets = inputs.pop('targets', [])
 
         inputs_for_retriever = inputs.pop('inputs_for_retriever')
+        loss_r_co, loss_g_nll, loss_g_rl = 0, 0, 0
 
         ## [RAG]
         ### Retrieval and re-ranking
@@ -83,16 +91,16 @@ class RLTrainer(RewardTrainer):
             return_tensors='pt'
         ).to(model.llm.device)
 
-        outputs_answers = model.llm.generate(
-            **inputs_zeroshot,
-            do_sample=True,
-            temperature=1.0,
-            top_p=0.95,
-            max_new_tokens=32,
-            eos_token_id=model.stop_token_ids,
-            pad_token_id=self.tokenizer.pad_token_id,
-            use_cache=True
-        )
+        # outputs_answers = model.llm.generate(
+        #     **inputs_zeroshot,
+        #     do_sample=True,
+        #     temperature=1.0,
+        #     top_p=0.95,
+        #     max_new_tokens=32,
+        #     eos_token_id=model.stop_token_ids,
+        #     pad_token_id=self.tokenizer.pad_token_id,
+        #     use_cache=True
+        # )
 
         #### (2) retrieval-agumentated feedback wo/ answer
         inputs_feedbacks = self.tokenizer(
@@ -125,22 +133,16 @@ class RLTrainer(RewardTrainer):
 
         # calculate loss, optionally modulate with margin
         # loss = -F.logsigmoid(rewards_chosen - rewards_rejected).mean()
-        loss_g_rl = 0
         loss = loss_r_co.mean() + loss_g_nll.mean() + loss_g_rl
 
         if self.accelerator.process_index == 0:
-            log = {"loss_r_co": loss_r_co.item(),
-                   "loss_g_nll": loss_g_nll.mean().item(),
+            log = {"loss_r_co": loss_r_co.clone().detach().item(),
+                   "loss_g_nll": loss_g_nll.mean().clone().detach().item(),
                    "loss_g_rl": 0}
             self.log(log)
             self.accelerator.log(log)
 
         return loss
-
-    def create_optimizer_and_scheduler(self, questions, contexts):
-        self.create_scheduler(
-            num_training_steps=num_training_steps, optimizer=optimizer
-        )
 
     def _prepare_prompts(self, questions, contexts):
         prompts = []
@@ -206,3 +208,38 @@ class RLTrainer(RewardTrainer):
             num_training_steps=num_training_steps,
             num_warmup_steps=int(num_training_steps * self.args.warmup_ratio),
         )
+
+    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        # If we are executing this function, we are the process zero, so we don't check for that.
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Saving model checkpoint to {output_dir}")
+
+        supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+        # Save a trained model and configuration using `save_pretrained()`.
+        # They can then be reloaded using `from_pretrained()`
+        ## [rag > [biencoders], llm > d_encoder, [q_encoder] > [model] (bert)
+        if not isinstance(self.model.biencoders.q_encoder.model, supported_classes):
+            if state_dict is None:
+                state_dict = self.model.biencoders.q_encoder.model.state_dict()
+
+            if isinstance(unwrap_model(self.model.biencoders.q_encoder.model), supported_classes):
+                unwrap_model(self.model.biencoders.q_encoder.model).save_pretrained(
+                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+                )
+            else:
+                logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
+                if self.args.save_safetensors:
+                    safetensors.torch.save_file(state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME))
+                else:
+                    torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+        else:
+            self.model.biencoders.q_encoder.model.save_pretrained(
+                output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+            )
+
+        if self.tokenizer is not None:
+            self.tokenizer.save_pretrained(output_dir)
+
+        # Good practice: save your training arguments together with the trained model
+        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
