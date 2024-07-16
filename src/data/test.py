@@ -1,6 +1,5 @@
 from qampari import ContextQADataset
 
-
 split = 'test'
 dataset = ContextQADataset(
     data_file=f'/home/dju/datasets/qampari/{split}_data.jsonl',
@@ -10,7 +9,7 @@ dataset = ContextQADataset(
     depth=10,
     corpus_file='/home/dju/datasets/qampari/wikipedia_chunks/chunks_v5',
     retrieval_file=f'/home/dju/datasets/qampari/{split}_data_bm25-top100.run',
-    quick_test=True
+    quick_test=5
 )
 # add action for index 0
 dataset.add_action(0, 'this is 0 testing action (next)')
@@ -32,7 +31,7 @@ from torch.utils.data import DataLoader
 loader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=collator)
 
 for b in loader:
-    print(b['inputs_for_retriever']['q_texts'])
+    print(b['inputs_for_retriever']['q_tokens'])
     dataset.add_action(0, f'this is 0 testing action')
     dataset.add_action(1, f'this is 1 testing action')
     dataset.add_action(2, f'this is 2 testing action')

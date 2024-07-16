@@ -32,7 +32,7 @@ BASE_LLM=meta-llama/Meta-Llama-3-8B-Instruct
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GRADIENT_ACC_STEPS gradient accumulation steps"
 
-deepspeed --num_gpus $NUM_GPUS hf_finetune.py \
+deepspeed --num_gpus $NUM_GPUS hf_base.py \
     --num_processes $NUM_GPUS \
     --bf16 \
     --retriever_name_or_path $BASE_RET \

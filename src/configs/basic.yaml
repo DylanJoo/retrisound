@@ -1,0 +1,23 @@
+---
+config_file: configs/basic.yaml
+retriever_name_or_path: facebook/contriever-msmarco
+generator_name_or_path: TinyLlama/TinyLlama-1.1B-Chat-v0.6
+attn_implementation: flash_attention_2
+train_file: /home/dju/datasets/qampari/train_data.jsonl
+corpus_file: /home/dju/datasets/qampari/wikipedia_chunks/chunks_v5
+retrieval_file: /home/dju/datasets/qampari/train_data_bm25-top100.run
+dataloader_num_workers: 16
+learning_rate: 0.00001
+lr_scheduler_type: linear
+warmup_ratio: 0.1
+weight_decay: 0.
+num_train_epochs: 1
+output_dir: /ivi/ilps/personal/dju/checkpoints/adarag_testing
+with_tracking: True
+report_to: wandb
+wandb_project: retrisound-debug
+quick_test: 5000
+max_steps: 5000
+save_steps: 1000
+logging_steps: 1
+policy_on: metrics

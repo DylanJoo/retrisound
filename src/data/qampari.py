@@ -15,6 +15,7 @@ from transformers.tokenization_utils_base import (
 )
 from .utils import load_corpus_file # normal use case
 # from utils import load_corpus_file # for unit test
+import sys
 
 class ContextQADataset(Dataset):
 
@@ -39,9 +40,10 @@ class ContextQADataset(Dataset):
         """
         data = []
         with open(data_file, 'r') as f:
-            for line in tqdm(f):
+            for line in f:
                 data.append(json.loads(line.strip()))
 
+        self.quick_test = quick_test 
         if quick_test is not None:
             data = data[:quick_test]
 
@@ -91,13 +93,27 @@ class ContextQADataset(Dataset):
                     self.corpus[docid] = {'text': "", 'title': ""}
                     # remove this if `_load_corpus` doesn't need to predefine
 
-    def _load_corpus(self, dir):
-        from multiprocessing import Pool
-        files = glob(f'{dir}/*jsonl')
-        with Pool(processes=16, maxtasksperchild=1024) as pool:
-            corpora = pool.map(load_corpus_file, files)
+    # def _load_corpus(self, dir):
+    #     from multiprocessing import Pool
+    #     files = glob(f'{dir}/*jsonl')
+    #     with Pool(processes=16, maxtasksperchild=1024) as pool:
+    #         corpora = pool.map(load_corpus_file, files)
+    #
+    #     for corpus in tqdm(corpora):
+    #         for docid, docdict in corpus.items():
+    #             print(sys.getsizeof(self))
+    #             try:
+    #                 self.corpus[docid].update(docdict)
+    #             except:
+    #                 continue
+    #                 # raiseKeyError as it's not in the retrieved budget
 
-        for corpus in tqdm(corpora):
+    def _load_corpus(self, dir):
+        files = glob(f'{dir}/*jsonl')
+        if self.quick_test is not None:
+            files = files[:5] 
+        for file in tqdm(files):
+            corpus = load_corpus_file(file)
             for docid, docdict in corpus.items():
                 try:
                     self.corpus[docid].update(docdict)

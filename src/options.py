@@ -22,6 +22,7 @@ class ModelOptions:
 
 @dataclass
 class DataOptions:
+    config_file: Optional[str] = field(default=None)
     train_file: Optional[str] = field(default=None)
     corpus_file: Optional[str] = field(default=None)
     retrieval_file: Optional[str] = field(default=None)
@@ -39,3 +40,5 @@ class TrainOptions(TrainingArguments):
     max_steps: int = field(default=-1) # different from HF's  
     num_processes: Optional[int] = field(default=1)
     remove_unused_columns: Optional[bool] = field(default=False)
+    policy_on: str = field(default='metrics')
+    learning_rate: float = field(default=5e-5)
