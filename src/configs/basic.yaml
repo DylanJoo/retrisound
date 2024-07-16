@@ -11,13 +11,11 @@ learning_rate: 0.00001
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.
-num_train_epochs: 1
-output_dir: /ivi/ilps/personal/dju/checkpoints/adarag_testing
 with_tracking: True
 report_to: wandb
 wandb_project: retrisound-debug
-quick_test: 5000
-max_steps: 5000
+output_dir: /ivi/ilps/personal/dju/checkpoints/adarag_testing
+num_train_epochs: 10
 save_steps: 1000
+policy_on: metrics 
 logging_steps: 1
-policy_on: metrics

@@ -83,7 +83,7 @@ class InBatchInteraction(nn.Module):
         # print(reranking)
         # reranking = torch.stack(reranking, dim=0)
 
-        scores = qembs @ demb.mT # (B N_seg H) x (B N_cand H) = B N_seg N_cand
+        scores = qembs @ dembs.mT # (B N_seg H) x (B N_cand H) = B N_seg N_cand
         r_ranking = 1/(alpha + 1 + (-scores).argsort(-1)) # reciprocal
         reranking = r_ranking.sum(-2).argsort(-1) # B N_cand
 

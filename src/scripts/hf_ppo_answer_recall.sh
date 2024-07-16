@@ -40,5 +40,5 @@ deepspeed --num_gpus $NUM_GPUS hf_ppo.py \
     --deepspeed stage3_no_offloading_accelerate.conf \
     --config_file configs/basic.yaml \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
-    --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --quick_test 10 
+    --gradient_accumulation_steps $GRADIENT_ACC_STEPS
+

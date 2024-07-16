@@ -77,6 +77,7 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         # prepare context
         contexts = []
         for batch_i, (candidate, ranking) in enumerate(zip(candidates, output_r.reranking)):
+            print(ranking)
             context = [p for p, r in sorted(zip(candidate, ranking))]
             contexts.append(context[:self.num_budget])
 

@@ -114,7 +114,7 @@ class RAGRLTrainer(PPOTrainer):
                 candidates=candidates,
                 response_masks=response_masks,
                 return_logits=full_kl_penalty,
-                ignore_query_part=True
+                preserved_length=max([len(r) for r in responses])
             )
             with self.optional_peft_ctx():
                 ref_logprobs, ref_logits_or_none, _, _ = self.batched_forward_pass(
@@ -123,7 +123,7 @@ class RAGRLTrainer(PPOTrainer):
                     responses,
                     model_inputs=model_inputs,
                     return_logits=full_kl_penalty,
-                    ignore_query_part=True
+                    preserved_length=max([len(r) for r in responses])
                 )
 
         timing["time/ppo/forward_pass"] = time.time() - t
@@ -149,9 +149,9 @@ class RAGRLTrainer(PPOTrainer):
 
         # upcast to float32 to avoid dataset issues
         batch_dict = {
-            "queries": queries,
-            "responses": responses,
-            "questions": questions,
+            "queries": queries,      # List[str]
+            "responses": responses,  # List[str]
+            "questions": questions,  # List[List[str]]
             "candidates": candidates,
             "retriever_inputs": retriever_inputs,
             "logprobs": all_logprobs.to(torch.float32),
@@ -196,14 +196,14 @@ class RAGRLTrainer(PPOTrainer):
 
                         logprobs, logits, vpreds, _ = self.batched_forward_pass(
                             self.model,
-                            mini_batch_dict["queries"], # this queries is in fact useless
-                            mini_batch_dict["responses"],
+                            queries=mini_batch_dict["queries"], # this queries is in fact useless
+                            responses=mini_batch_dict["responses"],
                             model_inputs=None,          # since we have to update queries first 
                             questions=mini_batch_dict["questions"],
                             retriever_inputs=mini_batch_dict["retriever_inputs"],
                             candidates=mini_batch_dict["candidates"],
                             return_logits=True,
-                            ignore_query_part=True
+                            preserved_length=max([len(r) for r in responses]),
                         )
                         train_stats = self.train_minibatch(
                             mini_batch_dict["logprobs"],
@@ -284,7 +284,7 @@ class RAGRLTrainer(PPOTrainer):
         candidates: dict = None,
         return_logits: bool = False,
         response_masks: Optional[torch.Tensor] = None,
-        ignore_query_part: bool = False,
+        preserved_length: Union[bool, int] = False,
     ):
         """
         Calculate model outputs in multiple batches.
@@ -296,6 +296,8 @@ class RAGRLTrainer(PPOTrainer):
                 List of tensors containing the encoded responses, shape (`batch_size`, `response_length`)
             return_logits (`bool`, *optional*, defaults to `False`):
                 Whether to return all_logits. Set to `False` if logits are not needed to reduce memory consumption.
+            preserved_length (`bool`, `int`, defaults to `False`):
+                whether and the length of truncation should offset the input query + response.
         Returns:
             (tuple):
                 - all_logprobs (`torch.FloatTensor`): Log probabilities of the responses,
@@ -377,14 +379,12 @@ class RAGRLTrainer(PPOTrainer):
             all_logprobs.append(logprobs)
             all_masks.append(masks)
 
-        if ignore_query_part:
-            response_length_offset = max([len(r) for r in responses]) + 1
-
+        if preserved_length:
             outputs = (
-                torch.cat(all_logprobs)[:, -response_length_offset:],
-                torch.cat(all_logits)[:, -(1+response_length_offset):-1] if return_logits else None,
-                torch.cat(all_values)[:, -(1+response_length_offset):-1],
-                torch.cat(all_masks)[:, -(1+response_length_offset):-1],
+                torch.cat(all_logprobs)[:, -preserved_length:],
+                torch.cat(all_logits)[:, -(1+preserved_length):-1] if return_logits else None,
+                torch.cat(all_values)[:, -(1+preserved_length):-1],
+                torch.cat(all_masks)[:, -(1+preserved_length):-1],
             )
         else:
             outputs = (
@@ -397,12 +397,14 @@ class RAGRLTrainer(PPOTrainer):
         return outputs
 
     @staticmethod
-    def get_minibatched_dictionary(retriever_inputs, indices):
+    def get_minibatched_dictionary(retriever_inputs, indices): # q_tokens, q_masks
         reshaped_retriever_inputs = {}
         for key, list_of_item in retriever_inputs.items():
             reshaped_retriever_inputs[key] = []
             for item in list_of_item:
                 reshaped_retriever_inputs[key].append( item[indices, :] )
+        # print('q', len(retriever_inputs['q_tokens']))
+        # print('d', len(retriever_inputs['d_tokens']))
         return reshaped_retriever_inputs
 
     # def prepare_model_inputs(self, queries: torch.Tensor, responses: torch.Tensor):

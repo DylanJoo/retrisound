@@ -90,7 +90,7 @@ def main():
         pretrained_model=llm,
         biencoders=bi_encoders,
         stop_token_ids=stop_token_ids,
-        num_budget=model_opt.num_contexts,
+        num_budget=model_opt.num_budget,
     ).eval()
 
     # [Reward model] 
@@ -109,7 +109,7 @@ def main():
         data_file=data_opt.train_file, 
         n_max_segments=train_opt.n_max_segments,
         n_max_candidates=train_opt.n_max_candidates,
-        budget=model_opt.budget,
+        budget=model_opt.num_budget,
         depth=data_opt.depth,
         corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
@@ -147,59 +147,75 @@ def main():
     )
 
     # train!
-    for _epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
+    for epoch in tqdm(range(train_opt.num_train_epochs), "epochs: "):
+        for batch in tqdm(ppo_trainer.dataloader):
     
-        #### Get the adaptive context from retriever
-        retriever_inputs = batch.pop("inputs_for_retriever")
-        prompts, prompts_fbk, prompts_last, loss_r = ppo_trainer.model._forward_retrieval(
-            **retriever_inputs,
-            questions=batch["questions"],
-            candidates=batch["candidates"]
-        )
-        # instruction + batch["questions"] + context
-        batch["queries"] = prompts
-        #### tokenized the adaptive context, as the query
-        tokenizer_g.padding_side = "left"
-        query_tensors = [tokenizer_g(q, return_tensors='pt').input_ids[0] for q in batch["queries"]]
-
-        if train_opt.policy_on == 'metrics': 
-            #### Get response 
-            response_tensors = ppo_trainer.generate(
-                query_tensors,
-                return_prompt=False,
-                min_length=-1,
-                top_p=1.0,
-                do_sample=True,
-                pad_token_id=tokenizer_g.pad_token_id,
-                max_new_tokens=64
+            #### Get the adaptive context from retriever
+            data_indices = batch.pop("index", None)
+            retriever_inputs = batch.pop("inputs_for_retriever")
+            prompts, prompts_fbk, prompts_last, loss_r = ppo_trainer.model._forward_retrieval(
+                **retriever_inputs,
+                questions=batch["questions"],
+                candidates=batch["candidates"]
             )
-            batch['responses'] = [tokenizer_g.decode(r.squeeze()) for r in response_tensors]
-            #### Compute reward score
-            # print(batch['responses'])
-            rewards = reward_model(batch['responses'], batch['targets'])
-            # print(rewards)
+            # instruction + batch["questions"] + context
+            batch["queries"] = prompts
+            #### tokenized the adaptive context, as the query
+            tokenizer_g.padding_side = "left"
+            query_tensors = [tokenizer_g(q, return_tensors='pt').input_ids[0] for q in batch["queries"]]
 
-        # if train_opt.policy_on == 'likelihood':
-        #     #### [NOTE] may need to revise `step()` as it also calculates nll
-        #     #### get likelihood
-        #     active_rewards = ppo_trainer.model.get_likelihood(prompts, targets)
-        #     ref_rewards = ppo_trainer.model.get_likelihood(prompts_last, targets)
-        #     rewards = active_rewards / ref_rewards
+            if train_opt.policy_on == 'metrics': 
+                #### Get response 
+                response_tensors = ppo_trainer.generate(
+                    query_tensors,
+                    return_prompt=False,
+                    top_p=1.0,
+                    do_sample=True,
+                    pad_token_id=tokenizer_g.pad_token_id,
+                    min_new_tokens=32,
+                    max_new_tokens=64
+                )
+                batch['responses'] = [tokenizer_g.decode(r.squeeze()) for r in response_tensors]
+                #### Compute reward score
+                rewards = reward_model(batch['responses'], batch['targets'])
 
-	#### Run PPO step
-        stats = ppo_trainer.step(
-            queries=query_tensors,
-            responses=response_tensors,
-            scores=rewards,
-            questions=batch['questions'],
-            retriever_inputs=retriever_inputs,
-            candidates=batch['candidates'],
-            targets=batch["targets"]
-        )
-        ppo_trainer.log_stats(stats, batch, rewards)
+            # if train_opt.policy_on == 'likelihood':
+            #     #### [NOTE] may need to revise `step()` as it also calculates nll
+            #     #### get likelihood
+            #     active_rewards = ppo_trainer.model.get_likelihood(prompts, targets)
+            #     ref_rewards = ppo_trainer.model.get_likelihood(prompts_last, targets)
+            #     rewards = active_rewards / ref_rewards
 
-    #### Save model
-    ppo_trainer.save_pretrained("my_ppo_model")
+            #### Run PPO step
+            stats = ppo_trainer.step(
+                queries=query_tensors,
+                responses=response_tensors,
+                scores=rewards,
+                questions=batch['questions'],
+                retriever_inputs=retriever_inputs,
+                candidates=batch['candidates'],
+                targets=batch["targets"]
+            )
+            ppo_trainer.log_stats(stats, batch, rewards)
+
+            ### add action to dataset
+            if data_indices is not None:
+                query_tensors = [tokenizer_g(q, return_tensors='pt').input_ids[0] for q in prompts_fbk]
+                feedback_tensors = ppo_trainer.generate(
+                    query_tensors,
+                    return_prompt=False,
+                    top_p=1.0,
+                    do_sample=True,
+                    pad_token_id=tokenizer_g.pad_token_id,
+                    max_new_tokens=64
+                )
+                feedbacks = [tokenizer_g.decode(fbk.squeeze()) for fbk in feedback_tensors]
+                for i, feedback in enumerate(feedbacks):
+                    train_dataset.add_action(data_indices[i], feedback)
+                    # print(i, feedback.replace('\n', ''))
+
+        #### Save model
+        ppo_trainer.save_pretrained("my_ppo_model")
 
 if __name__ == '__main__':
     main()

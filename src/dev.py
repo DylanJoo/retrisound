@@ -1,13 +1,16 @@
+import math
 import os
 import time
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from trl import PPOTrainer
-from trl.core import PPODecorators, stats_to_np
+from trl.models import PreTrainedModelWrapper
+from trl.core import PPODecorators, stats_to_np, logprobs_from_logits, stack_dicts, WANDB_PADDING, convert_to_scalar
 from transformers import PreTrainedModel, get_scheduler
 
 from prompt.qampari import *
@@ -16,12 +19,14 @@ class RAGRLTrainer(PPOTrainer):
 
     @PPODecorators.empty_device_cache()
     def step(
-	self,
-        retriever_inputs: Optional[dict], 
-        targets: List[str], 
+        self,
         queries: List[torch.LongTensor],
         responses: List[torch.LongTensor],
         scores: List[torch.FloatTensor],
+        questions: List[str], 
+        retriever_inputs: Optional[dict], 
+        candidates: List[str],
+        targets: List[str], 
         response_masks: Optional[List[torch.LongTensor]] = None,
     ): 
         """
@@ -78,7 +83,7 @@ class RAGRLTrainer(PPOTrainer):
         t = time.time()
 
         # [NOTE] remove it since this is not aligned to our collator
-        model_inputs = self.prepare_model_inputs(prompts, targets)
+        model_inputs = self.prepare_model_inputs(queries, responses)
 
         if self.is_distributed:
             pad_first = self.tokenizer.padding_side == "left"
@@ -101,21 +106,24 @@ class RAGRLTrainer(PPOTrainer):
         with torch.no_grad():
             all_logprobs, logits_or_none, values, masks = self.batched_forward_pass(
                 self.model,
-                queries,
+                queries, # this will be changed
                 responses,
-                retriever_inputs=retriever_inputs,
                 model_inputs=None,
+                questions=questions,
+                retriever_inputs=retriever_inputs,
+                candidates=candidates,
                 response_masks=response_masks,
                 return_logits=full_kl_penalty,
+                ignore_query_part=True
             )
             with self.optional_peft_ctx():
                 ref_logprobs, ref_logits_or_none, _, _ = self.batched_forward_pass(
                     self.model if self.is_peft_model else self.ref_model,
                     queries,
                     responses,
-                    retriever_inputs=None,
                     model_inputs=model_inputs,
                     return_logits=full_kl_penalty,
+                    ignore_query_part=True
                 )
 
         timing["time/ppo/forward_pass"] = time.time() - t
@@ -130,7 +138,9 @@ class RAGRLTrainer(PPOTrainer):
                     scores, active_full_logprobs, ref_full_logprobs, masks
                 )
             else:
-                rewards, non_score_reward, kls = self.compute_rewards(scores, all_logprobs, ref_logprobs, masks)
+                rewards, non_score_reward, kls = self.compute_rewards(
+                    scores, all_logprobs, ref_logprobs, masks
+                )
             timing["time/ppo/compute_rewards"] = time.time() - t
 
             t = time.time()
@@ -175,7 +185,7 @@ class RAGRLTrainer(PPOTrainer):
                         "responses": [batch_dict["responses"][i] for i in mini_batch_inds],
                         "questions": [batch_dict["questions"][i] for i in mini_batch_inds],
                         "candidates": [batch_dict["candidates"][i] for i in mini_batch_inds],
-                        "retriever_inputs": get_minibatched_dictionary(retriever_inputs, mini_batch_inds),
+                        "retriever_inputs": self.get_minibatched_dictionary(retriever_inputs, mini_batch_inds),
                         "advantages": batch_dict["advantages"][mini_batch_inds],
                         "returns": batch_dict["returns"][mini_batch_inds],
                     }
@@ -193,6 +203,7 @@ class RAGRLTrainer(PPOTrainer):
                             retriever_inputs=mini_batch_dict["retriever_inputs"],
                             candidates=mini_batch_dict["candidates"],
                             return_logits=True,
+                            ignore_query_part=True
                         )
                         train_stats = self.train_minibatch(
                             mini_batch_dict["logprobs"],
@@ -261,15 +272,6 @@ class RAGRLTrainer(PPOTrainer):
 
         return stats
 
-    def prepare_model_inputs(self, prompts: List[str], targets: List[str]):
-        inputs = self.tokenizer(
-            [f"{query} {response}" for (query, response) in zip(prompts, targets)],
-            padding=True,
-            truncation=True,
-            return_tensors='pt'
-        ).to(self.current_device)
-        return inputs
-
     @PPODecorators.empty_device_cache()
     def batched_forward_pass(
         self,
@@ -282,6 +284,7 @@ class RAGRLTrainer(PPOTrainer):
         candidates: dict = None,
         return_logits: bool = False,
         response_masks: Optional[torch.Tensor] = None,
+        ignore_query_part: bool = False,
     ):
         """
         Calculate model outputs in multiple batches.
@@ -317,13 +320,13 @@ class RAGRLTrainer(PPOTrainer):
                 questions=questions, 
                 candidates=candidates
             )
-            ## [NOTE] we didnt change `queries` here as it seems to be only for couting 
-            model_inputs = self.tokenizer(
-                [f"{q} {tgt}" for (q, tgt) in prompts, targets],
-                padding=True,
-                truncation=True,
-                return_tensors='pt'
-            ).to(self.device)
+            queries = [self.tokenizer(q, return_tensors='pt').input_ids[0] for q in prompts]
+            queries = [tensor.to(self.current_device) for tensor in queries]
+
+            model_inputs = self.prepare_model_inputs(queries, responses)
+
+        # print('r', max([len(r) for r in responses]))
+        # print('m', max([len(m) for m in model_inputs['input_ids']])) # [L] * B
 
         for i in range(math.ceil(bs / fbs)):
             # [NOTE] queries should be inferred here
@@ -336,6 +339,8 @@ class RAGRLTrainer(PPOTrainer):
             if response_masks is not None:
                 response_masks_batch = response_masks[i * fbs : (i + 1) * fbs]
             logits, _, values = model(**input_kwargs)
+            # print(logits.shape) # B L V
+            # print(values.shape) # B L 
 
             if self.is_encoder_decoder:
                 input_ids = input_kwargs["decoder_input_ids"]
@@ -372,12 +377,24 @@ class RAGRLTrainer(PPOTrainer):
             all_logprobs.append(logprobs)
             all_masks.append(masks)
 
-        return (
-            torch.cat(all_logprobs),
-            torch.cat(all_logits)[:, :-1] if return_logits else None,
-            torch.cat(all_values)[:, :-1],
-            torch.cat(all_masks)[:, :-1],
-        )
+        if ignore_query_part:
+            response_length_offset = max([len(r) for r in responses]) + 1
+
+            outputs = (
+                torch.cat(all_logprobs)[:, -response_length_offset:],
+                torch.cat(all_logits)[:, -(1+response_length_offset):-1] if return_logits else None,
+                torch.cat(all_values)[:, -(1+response_length_offset):-1],
+                torch.cat(all_masks)[:, -(1+response_length_offset):-1],
+            )
+        else:
+            outputs = (
+                torch.cat(all_logprobs),
+                torch.cat(all_logits)[:, :-1] if return_logits else None,
+                torch.cat(all_values)[:, :-1],
+                torch.cat(all_masks)[:, :-1],
+            )
+
+        return outputs
 
     @staticmethod
     def get_minibatched_dictionary(retriever_inputs, indices):
@@ -385,5 +402,93 @@ class RAGRLTrainer(PPOTrainer):
         for key, list_of_item in retriever_inputs.items():
             reshaped_retriever_inputs[key] = []
             for item in list_of_item:
-                reshaped_retriever_inputs.append( item[indices, :] )
+                reshaped_retriever_inputs[key].append( item[indices, :] )
         return reshaped_retriever_inputs
+
+    # def prepare_model_inputs(self, queries: torch.Tensor, responses: torch.Tensor):
+    #     input_ids = [torch.cat([q, r]) for q, r in zip(queries, responses)]
+    #     input_data = self.data_collator(
+    #         [{"input_ids": ids, "attention_mask": torch.ones_like(ids)} for ids in input_ids]
+    #     ).to(self.current_device)
+    #     input_data.pop("labels", None)  # we don't want to compute LM losses
+    #     # attention_mask: [padding] * n + [query] + [response]
+    #     query_mask = None
+    #     if return_query_mask:
+    #         query_mask = torch.zeros_like(input_data["attention_mask"].clone())
+    #         ## query_mask: [...] + [response]
+    #         for i, response in enumerate(responses):
+    #             query_mask[i, :-(1+len(response)) ] = 0
+    #
+    #     query_mask = None
+    #     if return_query_mask:
+    #         query_mask = input_data["attention_mask"].clone()
+    #         ## query_mask: select only the response part
+    #         for i, query, response in enumerate(zip(queries, responses)):
+    #             query_mask[i, -len(input_ids):-(1+len(response)) ] = 0
+    #     return input_data, query_mask
+
+    def compute_rewards(
+        self,
+        scores: torch.FloatTensor,
+        logprobs: torch.FloatTensor,
+        ref_logprobs: torch.FloatTensor,
+        masks: torch.LongTensor,
+    ):
+        """
+        Compute per token rewards from scores and KL-penalty.
+
+        Args:
+            scores (`torch.FloatTensor`):
+                Scores from the reward model, shape (`batch_size`)
+            logprobs (`torch.FloatTensor`):
+                Log probabilities of the model, shape (`batch_size`, `response_length`)
+            ref_logprobs (`torch.FloatTensor`):
+                Log probabilities of the reference model, shape (`batch_size`, `response_length`)
+
+        Returns:
+            `torch.FloatTensor`: Per token rewards, shape (`batch_size`, `response_length`)
+            `torch.FloatTensor`: Non score rewards, shape (`batch_size`, `response_length`)
+            `torch.FloatTensor`: KL penalty, shape (`batch_size`, `response_length`)
+        """
+        # print(scores.shape)
+        # print(logprobs.shape)
+        # print(ref_logprobs.shape)
+        # print(masks.shape)
+        rewards, non_score_rewards, kls = [], [], []
+        for score, logprob, ref_logprob, mask in zip(scores, logprobs, ref_logprobs, masks):
+            # compute KL penalty (from difference in logprobs)
+            kl = self._kl_penalty(logprob, ref_logprob)
+            kls.append(kl)
+            non_score_reward = -self.kl_ctl.value * kl
+            non_score_rewards.append(non_score_reward)
+            reward = non_score_reward.clone()
+            last_non_masked_index = mask.nonzero()[-1]
+            # print(reward)
+
+            # reward is preference model score + KL penalty
+            reward[last_non_masked_index] += score
+            rewards.append(reward)
+        return torch.stack(rewards), torch.stack(non_score_rewards), torch.stack(kls)
+
+    def gather_stats(self, stats):
+        """
+        Gather stats from all processes. Useful in the context of distributed training.
+
+        Args:
+            stats (dict[str, Any]):
+            a dictionary of stats to be gathered. The stats should contain torch tensors.
+
+        Returns:
+            `dict[str, Any]`: A dictionary of stats with the tensors gathered.
+        """
+        import torch.distributed as dist
+
+        # Wait for all processes to finish
+        dist.barrier()
+
+        for k, v in stats.items():
+            if isinstance(v, torch.Tensor):
+                dist.all_reduce(v.contiguous().to(self.accelerator.device), dist.ReduceOp.SUM)
+                v /= self.accelerator.num_processes
+            stats[k] = v
+        return stats

@@ -23,8 +23,8 @@ class ContextQADataset(Dataset):
         self, 
         data_file, 
         n_max_segments=10,
-        n_max_candidates=50,
-        depth=10,
+        n_max_candidates=10,
+        depth=30,
         budget=5,
         corpus_file=None,
         retrieval_file=None,
@@ -35,8 +35,8 @@ class ContextQADataset(Dataset):
         ------
         n_max_segment: the max number of segments (exclude the initial q)
         n_max_candidates: the max depth of considered intialized retrieval
-        depth: the size of psg for re-ranking as candidates may change
-        budget: the size of psg for later generator to read
+        depth: the pool size of psg for re-ranking as candidates may change
+        budget: the context size of psg for later generator to read
         """
         data = []
         with open(data_file, 'r') as f:
@@ -111,15 +111,28 @@ class ContextQADataset(Dataset):
     def _load_corpus(self, dir):
         files = glob(f'{dir}/*jsonl')
         if self.quick_test is not None:
-            files = files[:5] 
-        for file in tqdm(files):
-            corpus = load_corpus_file(file)
-            for docid, docdict in corpus.items():
-                try:
-                    self.corpus[docid].update(docdict)
-                except:
-                    continue
+            files = files[:5]
+        for file in tqdm(files, "load corpus:", total=len(files)):
+            with open(file, 'r') as f:
+                for line in f:
+                    item = json.loads(line.strip())
+                    docid = item['id']
+                    text = item['meta']['content']
+                    title = item['meta']['title']
+                    try:
+                        self.corpus[docid].update({"text": text, "title": title})
+                    except:
+                        continue
                     # raiseKeyError as it's not in the retrieved budget
+
+    # corpus = defaultdict(dict)
+    # with open(file, 'r') as f:
+    #     for line in f:
+    #         item = json.loads(line.strip())
+    #         docid = item['id']
+    #         corpus[docid]['text'] = item['meta']['content']
+    #         corpus[docid]['title'] = item['meta']['title']
+    # return corpus
 
     def _build(self, data):
         for idx in range(self.length):
@@ -142,8 +155,7 @@ class ContextQADataset(Dataset):
             i = self.actions[idx].index("") # empty strings
             self.actions[idx][i] = act
         except: # means it's full
-            self.actions[idx].pop(0) # remove the first one
-            self.actions[idx].append(act)
+            self.actions[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
         # self.actions[idx] += [act]
         # self.actions[idx] = self.actions[idx][-(self.n_max_segments):]
 
@@ -154,8 +166,7 @@ class ContextQADataset(Dataset):
 
     def __getitem__(self, idx):
         qid = self.qids[idx]
-        # ctx_pids = self.context_pids[idx][:self.budget] # can be qid or idx
-        cand_pids = self.candidate_pids[qid][:self.budget] # can be qid or idx
+        cand_pids = self.candidate_pids[qid][:self.n_max_candidates] # can be qid or idx
         return {'index': idx,
                 'questions': self.questions[idx], 
                 'actions': self.actions[idx],
@@ -250,7 +261,7 @@ class ContextQACollator(DefaultDataCollator):
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
         # evid-R, evid-Rprec
-        batch['answers'] = [f['answers'] for f in features] 
+        # batch['answers'] = [f['answers'] for f in features] 
         batch['candidate_pids'] = [f['candidate_pids'] for f in features] 
         return batch
 

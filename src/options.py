@@ -14,11 +14,10 @@ class ModelOptions:
     temperature: Optional[float] = field(default=1.0)
     n_negative_samples: Optional[int] = field(default=0)
     fixed_d_encoder: Optional[bool] = field(default=False)
-    num_mem_tokens: Optional[int] = field(default=16)
-    budget: Optional[int] = field(default=5)
     attn_implementation: Literal[None, 'sdpa', 'flash_attention_2'] = field(default=None)
     # use_special_tokens: Optional[bool] = field(default=False) # check
-    num_contexts: Optional[int] = field(default=5)
+    num_mem_tokens: Optional[int] = field(default=16)
+    num_budget: Optional[int] = field(default=5)
 
 @dataclass
 class DataOptions:
@@ -26,13 +25,13 @@ class DataOptions:
     train_file: Optional[str] = field(default=None)
     corpus_file: Optional[str] = field(default=None)
     retrieval_file: Optional[str] = field(default=None)
-    depth: Optional[int] = field(default=10)
+    depth: Optional[int] = field(default=30)
 
 @dataclass
 class TrainOptions(TrainingArguments):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     low_cpu_mem_usage: Optional[bool] = field(default=False) 
-    n_max_segments: Optional[int] = field(default=2)
+    n_max_segments: Optional[int] = field(default=8)
     n_max_candidates: Optional[int] = field(default=10)
     quick_test: Optional[int] = field(default=None)
     wandb_project: Optional[str] = field(default='testing')
