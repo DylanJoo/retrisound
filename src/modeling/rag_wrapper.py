@@ -49,6 +49,9 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
             p.requires_grad = False
         for p in self.biencoders.d_encoder.parameters():
             p.requires_grad = False
+        for p in self.v_head.parameters():
+            p.requires_grad = True
+
 
     def _forward_retrieval(
         self, 
@@ -58,6 +61,7 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         d_mask, 
         questions,
         candidates,
+        reference_contexts=False
     ):
         """
         params
@@ -71,15 +75,18 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         returns
         -------
         """
-        # retrieval
-        output_r = self.biencoders(q_tokens, q_mask, d_tokens, d_mask)
-
-        # prepare context
-        contexts = []
-        for batch_i, (candidate, ranking) in enumerate(zip(candidates, output_r.reranking)):
-            print(ranking)
-            context = [p for p, r in sorted(zip(candidate, ranking))]
-            contexts.append(context[:self.num_budget])
+        if reference_contexts:
+            contexts = [cand[:self.num_budget] for cand in candidates]
+            output_r = None
+        else:
+            # retrieval
+            output_r = self.biencoders(q_tokens, q_mask, d_tokens, d_mask)
+            # prepare context
+            assert len(candidates) == len(output_r.reranking)
+            contexts = []
+            for i, reranking in enumerate(output_r.reranking):
+                reranked_context = [candidates[i][j] for j in reranking]
+                contexts.append(reranked_context[:self.num_budget])
 
         # prepare prompts
         prompts = []

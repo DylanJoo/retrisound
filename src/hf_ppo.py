@@ -135,7 +135,11 @@ def main():
 	batch_size=train_opt.per_device_train_batch_size,
 	mini_batch_size=train_opt.per_device_train_batch_size // 2,
 	gradient_accumulation_steps=train_opt.gradient_accumulation_steps,
-	optimize_device_cache=True
+	optimize_device_cache=True,
+	ratio_threshold=100.0,
+	# init_kl_coef=0.0,
+	# adap_kl_ctrl=False,
+	# tracker_project_name=train_opt.wandb_project
     )
     ppo_trainer = RAGRLTrainer(
 	config=config,
@@ -159,25 +163,26 @@ def main():
                 candidates=batch["candidates"]
             )
             # instruction + batch["questions"] + context
-            batch["queries"] = prompts
+            batch["query"] = prompts
             #### tokenized the adaptive context, as the query
             tokenizer_g.padding_side = "left"
-            query_tensors = [tokenizer_g(q, return_tensors='pt').input_ids[0] for q in batch["queries"]]
+            query_tensors = [tokenizer_g(q, return_tensors='pt').input_ids[0] for q in batch["query"]]
 
             if train_opt.policy_on == 'metrics': 
                 #### Get response 
                 response_tensors = ppo_trainer.generate(
                     query_tensors,
                     return_prompt=False,
+                    top_k=0.0,
                     top_p=1.0,
                     do_sample=True,
-                    pad_token_id=tokenizer_g.pad_token_id,
-                    min_new_tokens=32,
+                    pad_token_id=tokenizer_g.eos_token_id,
+                    min_length=-1,
                     max_new_tokens=64
                 )
-                batch['responses'] = [tokenizer_g.decode(r.squeeze()) for r in response_tensors]
+                batch['response'] = [tokenizer_g.decode(r.squeeze()) for r in response_tensors]
                 #### Compute reward score
-                rewards = reward_model(batch['responses'], batch['targets'])
+                rewards = reward_model(batch['response'], batch['targets'])
 
             # if train_opt.policy_on == 'likelihood':
             #     #### [NOTE] may need to revise `step()` as it also calculates nll
@@ -196,7 +201,6 @@ def main():
                 candidates=batch['candidates'],
                 targets=batch["targets"]
             )
-            ppo_trainer.log_stats(stats, batch, rewards)
 
             ### add action to dataset
             if data_indices is not None:
@@ -204,15 +208,17 @@ def main():
                 feedback_tensors = ppo_trainer.generate(
                     query_tensors,
                     return_prompt=False,
-                    top_p=1.0,
+                    top_p=0.95,
                     do_sample=True,
-                    pad_token_id=tokenizer_g.pad_token_id,
+                    pad_token_id=tokenizer_g.eos_token_id,
                     max_new_tokens=64
                 )
                 feedbacks = [tokenizer_g.decode(fbk.squeeze()) for fbk in feedback_tensors]
                 for i, feedback in enumerate(feedbacks):
                     train_dataset.add_action(data_indices[i], feedback)
                     # print(i, feedback.replace('\n', ''))
+
+            ppo_trainer.log_stats(stats, batch, rewards)
 
         #### Save model
         ppo_trainer.save_pretrained("my_ppo_model")

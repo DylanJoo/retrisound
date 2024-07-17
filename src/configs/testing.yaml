@@ -1,7 +1,7 @@
 ---
 config_file: configs/basic.yaml
 retriever_name_or_path: facebook/contriever-msmarco
-generator_name_or_path: meta-llama/Meta-Llama-3-8B-Instruct
+generator_name_or_path: TinyLlama/TinyLlama-1.1B-Chat-v0.6
 attn_implementation: flash_attention_2
 train_file: /home/dju/datasets/qampari/train_data.jsonl
 corpus_file: /home/dju/datasets/qampari/wikipedia_chunks/chunks_v5

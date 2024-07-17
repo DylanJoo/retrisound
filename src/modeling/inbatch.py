@@ -85,7 +85,7 @@ class InBatchInteraction(nn.Module):
 
         scores = qembs @ dembs.mT # (B N_seg H) x (B N_cand H) = B N_seg N_cand
         r_ranking = 1/(alpha + 1 + (-scores).argsort(-1)) # reciprocal
-        reranking = r_ranking.sum(-2).argsort(-1) # B N_cand
+        reranking = r_ranking.sum(-2).argsort(-1).detach() # B N_cand
 
         ## 2) constrastive learning
         ### q <- qembs[:, 0, :] B (1) H. the first segment

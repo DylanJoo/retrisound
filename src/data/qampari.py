@@ -13,7 +13,7 @@ from transformers.tokenization_utils_base import (
     PreTrainedTokenizerBase,
     PaddingStrategy, 
 )
-from .utils import load_corpus_file # normal use case
+from .utils import load_corpus_file, batch_iterator # normal use case
 # from utils import load_corpus_file # for unit test
 import sys
 
@@ -93,11 +93,43 @@ class ContextQADataset(Dataset):
                     self.corpus[docid] = {'text': "", 'title': ""}
                     # remove this if `_load_corpus` doesn't need to predefine
 
+    def _load_corpus(self, dir):
+        from multiprocessing import Pool
+        files = glob(f'{dir}/*jsonl')
+        for batch_files in tqdm(batch_iterator(files, 1000), 'load wiki files:', total=1+len(files)//1000):
+            with Pool(processes=16) as pool:
+                corpora = pool.map(load_corpus_file, batch_files)
+
+            for corpus in corpora:
+                for docid, docdict in corpus.items():
+                    try:
+                        self.corpus[docid].update(docdict)
+                    except:
+                        continue
+            del corpora
+
+    # def _load_corpus(self, dir):
+    #     files = glob(f'{dir}/*jsonl')
+    #     if self.quick_test is not None:
+    #         files = files[:5]
+    #     for file in tqdm(files, "load corpus:", total=len(files)):
+    #         with open(file, 'r') as f:
+    #             for line in f:
+    #                 item = json.loads(line.strip())
+    #                 docid = item['id']
+    #                 text = item['meta']['content']
+    #                 title = item['meta']['title']
+    #                 try:
+    #                     self.corpus[docid].update({"text": text, "title": title})
+    #                 except:
+    #                     continue
+    #                 # raiseKeyError as it's not in the retrieved budget
+
     # def _load_corpus(self, dir):
     #     from multiprocessing import Pool
     #     files = glob(f'{dir}/*jsonl')
     #     with Pool(processes=16, maxtasksperchild=1024) as pool:
-    #         corpora = pool.map(load_corpus_file, files)
+    #         corpora = pool.map(load_corpus_file_v2, files)
     #
     #     for corpus in tqdm(corpora):
     #         for docid, docdict in corpus.items():
@@ -107,32 +139,6 @@ class ContextQADataset(Dataset):
     #             except:
     #                 continue
     #                 # raiseKeyError as it's not in the retrieved budget
-
-    def _load_corpus(self, dir):
-        files = glob(f'{dir}/*jsonl')
-        if self.quick_test is not None:
-            files = files[:5]
-        for file in tqdm(files, "load corpus:", total=len(files)):
-            with open(file, 'r') as f:
-                for line in f:
-                    item = json.loads(line.strip())
-                    docid = item['id']
-                    text = item['meta']['content']
-                    title = item['meta']['title']
-                    try:
-                        self.corpus[docid].update({"text": text, "title": title})
-                    except:
-                        continue
-                    # raiseKeyError as it's not in the retrieved budget
-
-    # corpus = defaultdict(dict)
-    # with open(file, 'r') as f:
-    #     for line in f:
-    #         item = json.loads(line.strip())
-    #         docid = item['id']
-    #         corpus[docid]['text'] = item['meta']['content']
-    #         corpus[docid]['title'] = item['meta']['title']
-    # return corpus
 
     def _build(self, data):
         for idx in range(self.length):
@@ -167,6 +173,10 @@ class ContextQADataset(Dataset):
     def __getitem__(self, idx):
         qid = self.qids[idx]
         cand_pids = self.candidate_pids[qid][:self.n_max_candidates] # can be qid or idx
+
+        if len(cand_pids) < self.n_max_candidates:
+            cand_pids += [-1] * max(0, self.n_max_candidates - len(cand_pids))
+
         return {'index': idx,
                 'questions': self.questions[idx], 
                 'actions': self.actions[idx],

@@ -83,15 +83,17 @@ class RAGRLTrainer(PPOTrainer):
         t = time.time()
 
         # [NOTE] remove it since this is not aligned to our collator
-        model_inputs = self.prepare_model_inputs(queries, responses)
+        preserved_length = max([len(r) for r in responses])
+        model_inputs = self.prepare_model_inputs(queries, responses, preserved_length)
 
+        # no idea why this should be done
         if self.is_distributed:
             pad_first = self.tokenizer.padding_side == "left"
 
             model_inputs["input_ids"] = self.accelerator.pad_across_processes(
                 model_inputs["input_ids"],
                 dim=1,
-                pad_index=self.tokenizer.pad_token_id,
+                pad_index=self.tokenizer.eos_token_id, # pad token is not used
                 pad_first=pad_first,
             )
             model_inputs["attention_mask"] = self.accelerator.pad_across_processes(
@@ -114,17 +116,31 @@ class RAGRLTrainer(PPOTrainer):
                 candidates=candidates,
                 response_masks=response_masks,
                 return_logits=full_kl_penalty,
-                preserved_length=max([len(r) for r in responses])
+                preserved_length=preserved_length
             )
+            # [NOTE] maybe a better reference model is the normal bm25 top k context
             with self.optional_peft_ctx():
                 ref_logprobs, ref_logits_or_none, _, _ = self.batched_forward_pass(
                     self.model if self.is_peft_model else self.ref_model,
-                    queries,
+                    queries, # this will be changed
                     responses,
-                    model_inputs=model_inputs,
+                    model_inputs=None,
+                    questions=questions,
+                    retriever_inputs=retriever_inputs,
+                    candidates=candidates,
+                    response_masks=response_masks,
                     return_logits=full_kl_penalty,
-                    preserved_length=max([len(r) for r in responses])
+                    preserved_length=preserved_length,
+                    reference_contexts=True
                 )
+                # ref_logprobs, ref_logits_or_none, _, _ = self.batched_forward_pass(
+                #     self.model if self.is_peft_model else self.ref_model,
+                #     queries,
+                #     responses,
+                #     model_inputs=model_inputs,
+                #     return_logits=full_kl_penalty,
+                #     preserved_length=preserved_length
+                # )
 
         timing["time/ppo/forward_pass"] = time.time() - t
 
@@ -285,6 +301,7 @@ class RAGRLTrainer(PPOTrainer):
         return_logits: bool = False,
         response_masks: Optional[torch.Tensor] = None,
         preserved_length: Union[bool, int] = False,
+        reference_contexts: bool = False
     ):
         """
         Calculate model outputs in multiple batches.
@@ -320,20 +337,18 @@ class RAGRLTrainer(PPOTrainer):
             prompts, _, _, _ = model._forward_retrieval(
                 **retriever_inputs, 
                 questions=questions, 
-                candidates=candidates
+                candidates=candidates,
+                reference_contexts=reference_contexts
             )
             queries = [self.tokenizer(q, return_tensors='pt').input_ids[0] for q in prompts]
             queries = [tensor.to(self.current_device) for tensor in queries]
 
-            model_inputs = self.prepare_model_inputs(queries, responses)
+            model_inputs = self.prepare_model_inputs(queries, responses, preserved_length)
 
         # print('r', max([len(r) for r in responses]))
         # print('m', max([len(m) for m in model_inputs['input_ids']])) # [L] * B
 
         for i in range(math.ceil(bs / fbs)):
-            # [NOTE] queries should be inferred here
-            # query_batch = queries[i * fbs : (i + 1) * fbs]
-
             # model inputs
             input_kwargs = {key: value[i * fbs : (i + 1) * fbs] for key, value in model_inputs.items()}
             query_batch = queries[i * fbs : (i + 1) * fbs]
@@ -406,6 +421,28 @@ class RAGRLTrainer(PPOTrainer):
         # print('q', len(retriever_inputs['q_tokens']))
         # print('d', len(retriever_inputs['d_tokens']))
         return reshaped_retriever_inputs
+
+    def prepare_model_inputs(self, queries: torch.Tensor, responses: torch.Tensor, max_response_length: int = None):
+        ## retokenize the response, we would like it to be consistent.
+        if max_response_length is not None:
+            self.tokenizer.padding_side = 'right'
+            response_inputs = self.tokenizer.pad(
+                {"input_ids": responses},
+                padding='max_length',
+                max_length=max_response_length
+            )
+            responses = response_inputs.input_ids.to(queries[0].device)
+            # response_masks = response_inputs.to(queries[0].device)
+            self.tokenizer.padding_side = 'left'
+
+        ## retokenize the response, we would like it to be consistent.
+        input_ids = [torch.cat([q, r]) for q, r in zip(queries, responses)]
+        input_data = self.data_collator(
+            [{"input_ids": ids, "attention_mask": torch.ones_like(ids)} for ids in input_ids]
+        ).to(self.current_device)
+
+        input_data.pop("labels", None)  # we don't want to compute LM losses
+        return input_data
 
     # def prepare_model_inputs(self, queries: torch.Tensor, responses: torch.Tensor):
     #     input_ids = [torch.cat([q, r]) for q, r in zip(queries, responses)]
@@ -494,3 +531,24 @@ class RAGRLTrainer(PPOTrainer):
                 v /= self.accelerator.num_processes
             stats[k] = v
         return stats
+
+    def _kl_penalty(
+        self, 
+        logprob: torch.FloatTensor, 
+        ref_logprob: torch.FloatTensor
+    ) -> torch.FloatTensor:
+        if self.config.kl_penalty == "kl":
+            return logprob - ref_logprob
+
+        if self.config.kl_penalty == "abs":
+            return (logprob - ref_logprob).abs()
+
+        if self.config.kl_penalty == "mse":
+            return 0.5 * (logprob - ref_logprob).square()
+
+        if self.config.kl_penalty == "full":
+            # Flip is required due to this issue? :https://github.com/pytorch/pytorch/issues/57459
+            return F.kl_div(ref_logprob, logprob, log_target=True, reduction="none").sum(-1)
+
+        raise NotImplementedError
+
