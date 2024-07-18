@@ -7,15 +7,14 @@ train_file: /home/dju/datasets/qampari/train_data.jsonl
 corpus_file: /home/dju/datasets/qampari/wikipedia_chunks/chunks_v5
 retrieval_file: /home/dju/datasets/qampari/train_data_bm25-top100.run
 dataloader_num_workers: 16
-learning_rate: 0.00001
+learning_rate: 0.0001
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.
-with_tracking: True
 report_to: wandb
 wandb_project: retrisound-debug
 output_dir: /ivi/ilps/personal/dju/checkpoints/adarag_testing
 num_train_epochs: 10
 save_steps: 1000
-policy_on: metrics 
 logging_steps: 1
+quick_test: 10

@@ -11,5 +11,4 @@ class Metrics:
             self.models = evalaute.load('rouge')
 
     def __call__(self, predictions, references):
-
-        self.rouge 
+        self.model(predictions ,references)

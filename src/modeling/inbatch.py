@@ -37,7 +37,7 @@ class InBatchInteraction(nn.Module):
         self.is_ddp = False
 
         # learning hyperparameter
-        self.tau = opt.temperature
+        self.tau = opt.tau
 
         ## negative miner
         self.miner = miner

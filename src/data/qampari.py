@@ -44,9 +44,6 @@ class ContextQADataset(Dataset):
                 data.append(json.loads(line.strip()))
 
         self.quick_test = quick_test 
-        if quick_test is not None:
-            data = data[:quick_test]
-
         self.length = len(data)
         self.n_max_segments = n_max_segments
         self.n_max_candidates = n_max_candidates
@@ -96,6 +93,8 @@ class ContextQADataset(Dataset):
     def _load_corpus(self, dir):
         from multiprocessing import Pool
         files = glob(f'{dir}/*jsonl')
+        if self.quick_test is not None:
+            files = files[:10]
         for batch_files in tqdm(batch_iterator(files, 1000), 'load wiki files:', total=1+len(files)//1000):
             with Pool(processes=16) as pool:
                 corpora = pool.map(load_corpus_file, batch_files)

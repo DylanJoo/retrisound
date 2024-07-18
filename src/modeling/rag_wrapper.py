@@ -36,6 +36,7 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         biencoders,
         stop_token_ids,
         num_budget,
+        is_reference=False,
         **kwargs
     ):
         super().__init__(pretrained_model, **kwargs)
@@ -43,15 +44,19 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         self.stop_token_ids = stop_token_ids
         self.num_budget = num_budget
         self.is_peft_model = False
+        self.is_reference = is_reference
 
         # freeze params
-        for p in self.pretrained_model.parameters():
+        for n, p in self.pretrained_model.named_parameters():
             p.requires_grad = False
-        for p in self.biencoders.d_encoder.parameters():
-            p.requires_grad = False
-        for p in self.v_head.parameters():
+        for n, p in self.v_head.named_parameters():
             p.requires_grad = True
 
+        if is_reference is False:
+            for n, p in self.biencoders.d_encoder.named_parameters():
+                p.requires_grad = False
+            for n, p in self.biencoders.q_encoder.named_parameters():
+                p.requires_grad = True
 
     def _forward_retrieval(
         self, 
@@ -61,7 +66,6 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         d_mask, 
         questions,
         candidates,
-        reference_contexts=False
     ):
         """
         params
@@ -75,7 +79,7 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         returns
         -------
         """
-        if reference_contexts:
+        if self.is_reference:
             contexts = [cand[:self.num_budget] for cand in candidates]
             output_r = None
         else:
@@ -182,31 +186,6 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         #     labels[i, :(s-1)] = -100
         # loss_g = self.compute_nll(output_g.logits, labels)
         # logs = {'InfoNCE': loss_r, 'mle': loss_g.mean()}
-
-        ## step4. generate feedbacks 
-        # inputs_fbk = self.tokenizer(
-        #     prompts_fbk,
-        #     padding=True,
-        #     truncation=True,
-        #     return_tensors='pt'
-        # ).to(self.llm.device)
-        # output_fbk = self.llm.generate(
-        #     **inputs_fbk, 
-        #     do_sample=True,
-        #     temperature=1.0,
-        #     top_p=0.95,
-        #     max_new_tokens=32,
-        #     eos_token_id=self.stop_token_ids,
-        #     pad_token_id=self.tokenizer.pad_token_id
-        # )
-        # feedbacks = []
-        # for i, output in enumerate(output_fbk):
-        #     feedback = self.tokenizer.decode(
-        #         output[inputs_fbk['input_ids'][i].size(-1):], 
-        #         skip_special_tokens=True
-        #     )
-        #     feedback = feedback.split('\n\n')[0]
-        #     feedbacks.append(feedback)
         return output_g
 
         # return RAGOutput(
@@ -219,10 +198,10 @@ class RerankAugmentedGenerationWrapper(AutoModelForCausalLMWithValueHead):
         #     feedbacks=feedbacks
         # )
 
-    def gradient_checkpointing_enable(self, **kwargs):
-        self.biencoders.q_encoder.model.gradient_checkpointing_enable(**kwargs)
-        self.biencoders.d_encoder.gradient_checkpointing_enable(**kwargs)
-        # self.llm.gradient_checkpointing_enable(**kwargs)
+    # def gradient_checkpointing_enable(self, **kwargs):
+    #     self.biencoders.q_encoder.model.gradient_checkpointing_enable(**kwargs)
+    #     self.biencoders.d_encoder.gradient_checkpointing_enable(**kwargs)
+    #     self.llm.gradient_checkpointing_enable(**kwargs)
 
     def compute_nll(self, logits, labels):
         ## extract the batch-wise mean

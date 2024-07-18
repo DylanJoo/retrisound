@@ -38,8 +38,6 @@ def main():
     model_opt, data_opt, train_opt = parser.parse_args_into_dataclasses()
     if data_opt.config_file is not None:
         model_opt, data_opt, train_opt = parser.parse_yaml_file(data_opt.config_file)
-
-    os.environ["WANDB_PROJECT"] = train_opt.wandb_project
     set_seed(train_opt.seed)
 
     # [Retriever Bi-encoder]
@@ -53,7 +51,7 @@ def main():
         n_max_segments=train_opt.n_max_segments,
         input_size=128,
         sum_loss=False,
-    )
+    ).train()
     from modeling.inbatch import InBatchInteraction
     bi_encoders = InBatchInteraction(
         model_opt,
@@ -70,7 +68,7 @@ def main():
             padding_side='left',
             use_fast=True
     )
-    tokenizer_g = update_tokenizer(tokenizer_g, '<|reserved_special_token_0|>')
+    tokenizer_g = update_tokenizer(tokenizer_g)
     config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
 
     stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
@@ -91,6 +89,14 @@ def main():
         biencoders=bi_encoders,
         stop_token_ids=stop_token_ids,
         num_budget=model_opt.num_budget,
+    ).train()
+
+    ref_model = RerankAugmentedGenerationWrapper(
+        pretrained_model=model.pretrained_model,
+        biencoders=None, # the reference model is actually a one-shot RAG with bm25
+        stop_token_ids=stop_token_ids,
+        num_budget=model_opt.num_budget,
+        is_reference=True
     ).eval()
 
     # [Reward model] 
@@ -136,7 +142,6 @@ def main():
 	mini_batch_size=train_opt.per_device_train_batch_size // 2,
 	gradient_accumulation_steps=train_opt.gradient_accumulation_steps,
 	optimize_device_cache=True,
-	ratio_threshold=100.0,
 	# init_kl_coef=0.0,
 	# adap_kl_ctrl=False,
 	# tracker_project_name=train_opt.wandb_project
@@ -144,7 +149,7 @@ def main():
     ppo_trainer = RAGRLTrainer(
 	config=config,
 	model=model,
-	ref_model=model,
+	ref_model=ref_model,
 	tokenizer=tokenizer_g,
 	dataset=train_dataset,
 	data_collator=data_collator
@@ -184,13 +189,6 @@ def main():
                 #### Compute reward score
                 rewards = reward_model(batch['response'], batch['targets'])
 
-            # if train_opt.policy_on == 'likelihood':
-            #     #### [NOTE] may need to revise `step()` as it also calculates nll
-            #     #### get likelihood
-            #     active_rewards = ppo_trainer.model.get_likelihood(prompts, targets)
-            #     ref_rewards = ppo_trainer.model.get_likelihood(prompts_last, targets)
-            #     rewards = active_rewards / ref_rewards
-
             #### Run PPO step
             stats = ppo_trainer.step(
                 queries=query_tensors,
@@ -201,6 +199,7 @@ def main():
                 candidates=batch['candidates'],
                 targets=batch["targets"]
             )
+            print(ppo_trainer.model.biencoders.q_encoder.model.embeddings.word_embeddings.weight)
 
             ### add action to dataset
             if data_indices is not None:

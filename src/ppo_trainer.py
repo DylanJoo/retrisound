@@ -121,8 +121,8 @@ class RAGRLTrainer(PPOTrainer):
             # [NOTE] maybe a better reference model is the normal bm25 top k context
             with self.optional_peft_ctx():
                 ref_logprobs, ref_logits_or_none, _, _ = self.batched_forward_pass(
-                    self.model if self.is_peft_model else self.ref_model,
-                    queries, # this will be changed
+                    self.ref_model, # this model has no retriever
+                    queries,        # this will be changed
                     responses,
                     model_inputs=None,
                     questions=questions,
@@ -131,7 +131,6 @@ class RAGRLTrainer(PPOTrainer):
                     response_masks=response_masks,
                     return_logits=full_kl_penalty,
                     preserved_length=preserved_length,
-                    reference_contexts=True
                 )
                 # ref_logprobs, ref_logits_or_none, _, _ = self.batched_forward_pass(
                 #     self.model if self.is_peft_model else self.ref_model,
@@ -301,7 +300,6 @@ class RAGRLTrainer(PPOTrainer):
         return_logits: bool = False,
         response_masks: Optional[torch.Tensor] = None,
         preserved_length: Union[bool, int] = False,
-        reference_contexts: bool = False
     ):
         """
         Calculate model outputs in multiple batches.
@@ -329,8 +327,7 @@ class RAGRLTrainer(PPOTrainer):
         all_logits = []
         all_masks = []
         all_values = []
-
-        model.eval()
+        # model.eval()
 
         # get the queries 
         if model_inputs is None:
@@ -338,7 +335,6 @@ class RAGRLTrainer(PPOTrainer):
                 **retriever_inputs, 
                 questions=questions, 
                 candidates=candidates,
-                reference_contexts=reference_contexts
             )
             queries = [self.tokenizer(q, return_tensors='pt').input_ids[0] for q in prompts]
             queries = [tensor.to(self.current_device) for tensor in queries]

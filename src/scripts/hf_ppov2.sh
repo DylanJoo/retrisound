@@ -1,11 +1,10 @@
 #!/bin/sh
-#SBATCH --job-name=adarag-ppo
+#SBATCH --job-name=ppov2
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_rtx_a6000:2
-#SBATCH --mem=64G
+#SBATCH --gres=gpu:nvidia_rtx_a6000:1
+#SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
 #SBATCH --time=48:00:00
 #SBATCH --output=logs/%x.%j.out
 
@@ -15,18 +14,21 @@ conda activate retrisound
 
 # Start the experiment.
 # Setups
-NUM_GPUS=2
-BATCH_SIZE_PER_GPU=8
-TOTAL_BATCH_SIZE=32
+NUM_GPUS=1
+BATCH_SIZE_PER_GPU=16
+TOTAL_BATCH_SIZE=16
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 
 echo "Training using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GRADIENT_ACC_STEPS gradient accumulation steps"
 
-deepspeed --num_gpus $NUM_GPUS hf_ppo.py \
-    --num_processes $NUM_GPUS \
-    --bf16 \
-    --deepspeed stage3_no_offloading_accelerate.conf \
-    --config_file configs/testing.yaml \
+accelerate launch --config_file configs/deepspeed_zero3.yaml \
+    hf_ppov2.py \
+    --config_file configs/debug.yaml \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
-    --gradient_accumulation_steps $GRADIENT_ACC_STEPS
-
+    --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
+    --total_episodes 10000 \
+    --num_ppo_epochs 4 \
+    --n_max_segments 3 \
+    --n_max_candidates 10 \
+    --num_budget 5 \
+    --depth 30
