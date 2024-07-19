@@ -24,8 +24,8 @@ echo "Training using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GR
 deepspeed --num_gpus $NUM_GPUS hf_ppo.py \
     --num_processes $NUM_GPUS \
     --bf16 \
-    --deepspeed stage3_no_offloading_accelerate.conf \
-    --config_file configs/testing.yaml \
+    --deepspeed stage2_accelerate.conf \
+    --config_file configs/debug.yaml \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS
     --n_max_segments 3 \

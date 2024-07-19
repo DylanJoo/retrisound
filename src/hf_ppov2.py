@@ -44,21 +44,24 @@ def main():
     from modeling.rmt import RMTEncoder
     from modeling.rife import Contriever
     ada_encoder = RMTEncoder(
-        base_model=Contriever.from_pretrained(model_opt.retriever_name_or_path),
+        base_model=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path,
+        ),
         tokenizer=tokenizer_r,
         num_mem_tokens=model_opt.num_mem_tokens,
         n_max_segments=train_opt.n_max_segments,
         input_size=128,
         sum_loss=False,
-    ).train()
+    )
     from modeling.inbatch import InBatchInteraction
     bi_encoders = InBatchInteraction(
         model_opt,
         q_encoder=ada_encoder,
-        d_encoder=Contriever.from_pretrained(model_opt.retriever_name_or_path),
+        d_encoder=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path,
+        ),
         fixed_d_encoder=True
     )
-
     # [Generatir Config & tokenizer & Model]
     ## [TODO] Check further the accurate setup of tokenizer for llama
     from utils import update_tokenizer
@@ -75,31 +78,31 @@ def main():
 
     # [RAG]
     config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
-    model_kwargs = {
-        'stop_token_ids': stop_token_ids,
-        'num_budget': model_opt.num_budget,
-    }
     from modeling.rag_wrapper2 import RerankAugmentedGenerationWrapper
     model = RerankAugmentedGenerationWrapper.from_pretrained(
         model_opt.generator_name_or_path,
         config=config,
         low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
         attn_implementation=model_opt.attn_implementation,
+        stop_token_ids=stop_token_ids,
+        num_budget=model_opt.num_budget,
         torch_dtype=torch.bfloat16,
-        **model_kwargs
+        is_reference=False
     )
     model.set_biencoders(bi_encoders)
     model.set_tokenizer(tokenizer_g)
+
     ref_model = RerankAugmentedGenerationWrapper.from_pretrained(
         model_opt.generator_name_or_path,
+        config=config,
         low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
         attn_implementation=model_opt.attn_implementation,
-        torch_dtype=torch.bfloat16,
         stop_token_ids=stop_token_ids,
         num_budget=model_opt.num_budget,
+        torch_dtype=torch.bfloat16,
         is_reference=True
     )
-    ref_model.set_tokenizer(tokenizer_g)
+    model.set_tokenizer(tokenizer_g)
     # [Model for RL]
     from modeling.rewards import MetricRewards
     reward_model = MetricRewards('rouge')
@@ -135,7 +138,7 @@ def main():
 	reward_model=reward_model,
 	value_model=reward_model,
 	train_dataset=train_dataset,
-	data_collator=data_collator
+	data_collator=data_collator,
     )
     ppo_trainer.train()
 

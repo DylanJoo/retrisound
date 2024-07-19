@@ -52,13 +52,9 @@ class PolicyAndValueWrapper(nn.Module):
         super().__init__()
         self.policy = policy
         self.value_model = reward_model
-        # self.critic_backbone = getattr(value_model, value_model.base_model_prefix)
 
-    # def forward(self, **kwargs):
-    #     # output = self.critic_backbone(**kwargs)
-    #     logits = self.value_model(**kwargs).score
-    #     return self.policy(**kwargs), logits
-
+    def forward(self, **kwargs):
+        return self.policy(**kwargs)
 
 
 class RAGPPOv2Trainer(PPOv2Trainer):
@@ -184,6 +180,8 @@ class RAGPPOv2Trainer(PPOv2Trainer):
         self.model, self.optimizer, self.dataloader = accelerator.prepare(self.model, self.optimizer, self.dataloader)
         torch.manual_seed(self.local_seed)  # reset the local seed again
 
+        # args.bf16 = False
+        # args.fp16 = True
         if self.is_deepspeed_enabled:
             if isinstance(reward_model, nn.Module):
                 self.reward_model = prepare_deepspeed(
@@ -321,7 +319,6 @@ class RAGPPOv2Trainer(PPOv2Trainer):
                             )
 
                         # Response Processing 2. run reward model on the truncated responses
-
                         ## [NOTE] In RAG, it's a bit weird as we only change the query-side
                         # postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                         sequence_length = first_true_indices(target == tokenizer.pad_token_id) - 1 
@@ -330,14 +327,13 @@ class RAGPPOv2Trainer(PPOv2Trainer):
                         # unwrapped_value_model = accelerator.unwrap_model(model).value_model
                         value_output = forward(model.policy, query_target_new, tokenizer.pad_token_id) 
                         value_logits = value_output.logits[:, -target_length:]
-                        full_value = torch.gather(value_logits, 2, target.unsqueeze(-1)) #.squeeze(-1)
+                        value = torch.gather(value_logits, 2, target.unsqueeze(-1)).squeeze(-1)
                         del value_output, value_logits
                         torch.cuda.empty_cache()
-                        value = full_value[:, -target_length:].squeeze(-1)
 
                         # [NOTE] here the example used a hf model to do rewarding
-                        response_text  = [tokenizer.decode(r) for r in postprocessed_response]
-                        score = reward_model.calculate_rewards(response_text, target_text)
+                        # response_text  = [tokenizer.decode(r) for r in postprocessed_response]
+                        score = reward_model.calculate_rewards(prompts, target_text)
 
                         # [NOTE] Now we can replace the response with target
                         postprocessed_response = response = target
@@ -359,7 +355,7 @@ class RAGPPOv2Trainer(PPOv2Trainer):
                 values = torch.cat(values, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0).to(self.accelerator.device)
-                del (logprob, ref_logprob, full_value, value, score, unwrapped_model)
+                del (logprob, ref_logprob, value, score, unwrapped_model)
                 torch.cuda.empty_cache()
                 gc.collect()
 
@@ -417,7 +413,6 @@ class RAGPPOv2Trainer(PPOv2Trainer):
             ).input_ids.to(device)
 
             with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
-                print(unwrapped_model.policy.biencoders.q_encoder.model.embeddings.word_embeddings.weight)
                 query_feedbacks, _ = generate(
                     unwrapped_model.policy,
                     query,
@@ -434,24 +429,11 @@ class RAGPPOv2Trainer(PPOv2Trainer):
                 b_inds = np.random.permutation(args.local_batch_size)
                 minibatch_idx = 0
 
-                # retreive the set of context
-                prompts, _, _, _ = model.policy._forward_retrieval(
-                    **retriever_inputs,
-                    questions=data["questions"],
-                    candidates=data["candidates"]
-                )
-                queries = tokenizer(
-                    prompts,
-                    padding=True,
-                    truncation=True,
-                    return_tensors='pt'
-                ).input_ids.to(device)
-                query_responses, _ = get_expected_inputs(queries, target_texts, tokenizer)
-
                 for mini_batch_start in range(0, args.local_batch_size, args.local_mini_batch_size):
                     mini_batch_end = mini_batch_start + args.local_mini_batch_size
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                     gradient_accumulation_idx = 0
+
                     for micro_batch_start in range(0, args.local_mini_batch_size, args.per_device_train_batch_size):
                         with accelerator.accumulate(model):
                             micro_batch_end = micro_batch_start + args.per_device_train_batch_size
@@ -460,11 +442,28 @@ class RAGPPOv2Trainer(PPOv2Trainer):
                             mb_advantage = advantages[micro_batch_inds]
                             mb_values = values[micro_batch_inds]
                             mb_responses = responses[micro_batch_inds]
-                            # mb_query_responses = query_responses[micro_batch_inds]
-                            mb_query_responses = query_responses[micro_batch_inds]
-                            mb_logprobs = logprobs[micro_batch_inds]
+                            ### retreive the set of context
+                            mb_retriever_inputs = {}
+                            for key, list_of_item in retriever_inputs.items():
+                                mb_retriever_inputs[key] = []
+                                for item in list_of_item:
+                                    mb_retriever_inputs[key].append( item[micro_batch_inds] )
 
+                            mb_prompts, _, _, output_r = model.policy._forward_retrieval(
+                                **mb_retriever_inputs,
+                                questions=[data["questions"][i] for i in micro_batch_inds],
+                                candidates=[data["candidates"][i] for i in micro_batch_inds]
+                            )
+                            mb_queries = tokenizer(
+                                prompts,
+                                padding=True,
+                                truncation=True,
+                                return_tensors='pt'
+                            ).input_ids.to(device)
+                            mb_query_responses, _ = get_expected_inputs(mb_queries, mb_responses, tokenizer)
+                            mb_logprobs = logprobs[micro_batch_inds]
                             output = forward(model.policy, mb_query_responses, tokenizer.pad_token_id)
+
                             # here we set the value as output.logit
                             logits = output.logits[:, -target_length:]
                             logits /= args.temperature + 1e-7
@@ -499,9 +498,14 @@ class RAGPPOv2Trainer(PPOv2Trainer):
                             pg_loss_max = torch.max(pg_losses, pg_losses2)
                             pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
                             loss = pg_loss + args.vf_coef * vf_loss
+                            print(model.policy.model.embed_tokens.weight)
+                            print(model.policy.model.hello.weight)
+                            print(model.policy.biencoders.q_encoder.model.embeddings.word_embeddings.weight)
                             accelerator.backward(loss)
+                            # print(loss.grad)
                             optimizer.step()
                             optimizer.zero_grad()
+
                             with torch.no_grad():
                                 pg_clipfrac = masked_mean(
                                     (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
@@ -530,7 +534,6 @@ class RAGPPOv2Trainer(PPOv2Trainer):
                         pg_loss, loss, pg_clipfrac, prob_dist, entropy, approxkl, mb_return,
                         mb_advantage, mb_values, mb_responses, mb_query_responses, mb_logprobs,
                     )
-                    # fmt: on
                     torch.cuda.empty_cache()
             with torch.no_grad():
                 mean_kl = kl.sum(1).mean()

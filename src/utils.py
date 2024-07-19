@@ -18,7 +18,7 @@ def update_tokenizer(
     return tokenizer
 
 # add max length constraints
-def get_expected_inputs(query_tensors, targets, tokenizer):
+def get_expected_inputs(query_tensors, targets, tokenizer, micro_batch_inds=None):
     tokenizer.padding_side = 'right'
     target_tensors = tokenizer(
         targets,
@@ -26,6 +26,10 @@ def get_expected_inputs(query_tensors, targets, tokenizer):
         padding=True,
         return_tensors='pt'
     ).input_ids.to(query_tensors.device)
+    if micro_batch_inds is not None:
+        target_tensors = target_tensors[micro_batch_inds]
+
     input_tensors = torch.cat([query_tensors, target_tensors], -1)
     tokenizer.padding_side = 'left'
+
     return input_tensors, target_tensors.size(1)

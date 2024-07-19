@@ -1,106 +1,141 @@
+#!/usr/bin/env python
+# coding=utf-8
+
+import argparse
+import logging
+import math
+import os
+import sys
+import random
+import datasets
 import torch
+from datasets import load_dataset
+from tqdm.auto import tqdm
+import json
+from dataclasses import asdict
 from copy import deepcopy
-from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
-from options import ModelOptions, TrainOptions
-from memory_profiler import profile
 
-@profile
+from transformers import (
+    HfArgumentParser,
+    AutoConfig,
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    SchedulerType,
+    get_scheduler,
+    set_seed
+)
+from transformers.utils import logging 
+
+from utils import update_tokenizer
+
+logger = logging.get_logger("transformers")
+
 def main():
-    ## prepare kwargs
-    R_model_name_or_path='facebook/contriever'
-    # G_model_name_or_path='TinyLlama/TinyLlama-1.1B-Chat-v1.0'
-    G_model_name_or_path='meta-llama/Meta-Llama-3-8B-Instruct'
-    model_opt = ModelOptions(
-            retriever_name_or_path=R_model_name_or_path,
-            generator_name_or_path=G_model_name_or_path,
-    )
-    train_opt = TrainOptions()
 
-    ## prepare bi-encoders
-    tokenizer_r = AutoTokenizer.from_pretrained(R_model_name_or_path)
+    from options import ModelOptions, DataOptions, RLTrainOptions
+    parser = HfArgumentParser((ModelOptions, DataOptions, RLTrainOptions))
+    model_opt, data_opt, train_opt = parser.parse_args_into_dataclasses()
+    if data_opt.config_file is not None:
+        model_opt, data_opt, train_opt = parser.parse_yaml_file(data_opt.config_file)
+    set_seed(train_opt.seed)
+
+    # [Retriever Bi-encoder]
+    tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     from modeling.rmt import RMTEncoder
     from modeling.rife import Contriever
-    model = Contriever.from_pretrained(R_model_name_or_path)
-    encoder = deepcopy(model)
     ada_encoder = RMTEncoder(
-            base_model=model, 
-            num_mem_tokens=4,
-            tokenizer=tokenizer_r,
-            input_size=512,
-            sum_loss=False
+        base_model=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path,
+        ),
+        tokenizer=tokenizer_r,
+        num_mem_tokens=model_opt.num_mem_tokens,
+        n_max_segments=train_opt.n_max_segments,
+        input_size=128,
+        sum_loss=False,
     )
-    from modeling import InBatchInteraction
+    from modeling.inbatch import InBatchInteraction
     bi_encoders = InBatchInteraction(
-            model_opt, 
-            q_encoder=ada_encoder,
-            d_encoder=encoder,
-            fixed_d_encoder=True
+        model_opt,
+        q_encoder=ada_encoder,
+        d_encoder=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path,
+        ),
+        fixed_d_encoder=True
+    ).half()
+    # [Generatir Config & tokenizer & Model]
+    ## [TODO] Check further the accurate setup of tokenizer for llama
+    from utils import update_tokenizer
+    tokenizer_g = AutoTokenizer.from_pretrained(
+            model_opt.generator_name_or_path, 
+            padding_side='left',
+            use_fast=True
     )
+    tokenizer_g = update_tokenizer(tokenizer_g, "[PAD]")
 
-    ## prepare generator
-    tokenizer_g = AutoTokenizer.from_pretrained(G_model_name_or_path, use_fast=False)
-
-    ### [FIX] missing pad token
-    ### Regarding `forward` passing, llama3 include the pad token to achieve batch forward. However, the original pre-traing did not use pad. We here add a pseudo pad token (and you should ignore the loss from the MLE of them)
-    if tokenizer_g.pad_token is None:
-        tokenizer_g.add_special_tokens(
-            {'pad_token': '<|reserved_special_token_0|>'}
-        )
-
-    stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>"]
+    stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
     stop_token_ids = [tokenizer_g.eos_token_id] + [tokenizer_g.convert_tokens_to_ids(token) for token in stop]
-    stop_token_ids = list(set([token_id for token_id in stop_token_ids if token_id is not None]))
-    # tokenizer_g.eos_token_id = stop_token_ids
-    generator = AutoModelForCausalLM.from_pretrained(
-        G_model_name_or_path,
+    stop_token_ids = list(set([token_id for token_id in stop_token_ids if token_id is not None]))  
+
+    # [RAG]
+    config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
+    from modeling.rag_wrapper2 import RerankAugmentedGenerationWrapper
+    model = RerankAugmentedGenerationWrapper.from_pretrained(
+        model_opt.generator_name_or_path,
+        config=config,
         low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
-        pad_token_id=tokenizer_g.eos_token_id
+        attn_implementation=model_opt.attn_implementation,
+        stop_token_ids=stop_token_ids,
+        num_budget=model_opt.num_budget,
+        torch_dtype=torch.bfloat16,
+        is_reference=False
     )
+    model.set_biencoders(bi_encoders)
+    model.set_tokenizer(tokenizer_g)
+    print(model.model.embed_tokens.weight)
+    print(model.model.hello.weight)
+    print(model.model.embed_tokens.weight.dtype)
+    print(model.biencoders.q_encoder.model.embeddings.word_embeddings.weight)
+    print(model.biencoders.q_encoder.model.embeddings.word_embeddings.weight.dtype)
 
-    ### Resize embeds as long as pad token is out-of-vocab.
-    # if len(tokenizer_g) > generator.get_input_embeddings().weight.shape[0]:
-    #     model.resize_token_embeddings(len(tokenizer_g))
-
-    from modeling import RerankAugmentedGeneration
-    model = RerankAugmentedGeneration(
-        llm=generator, 
-        tokenizer=tokenizer_g,
-        biencoders=bi_encoders,
-        stop_token_ids=stop_token_ids
-    )
-
-    ## add data
-    split='test'
-    from data.qampari import ContextQADataset
-    dataset = ContextQADataset(
-        data_file=f'/home/dju/datasets/qampari/{split}_data.jsonl',
-        n_max_segments=10,
-        n_max_candidates=50,
-        budget=5,
-        depth=10,
-        corpus_file='/home/dju/datasets/qampari/wikipedia_chunks/chunks_v5',
-        retrieval_file=f'/home/dju/datasets/qampari/{split}_data_bm25-top100.run',
-        quick_test=True
-    )
-    dataset.add_action(0, 'this is a testing action')
-
-    features = [dataset[i] for i in range(4)]
-    from data.qampari import ContextQACollator
-    collator = ContextQACollator(
-        tokenizer_r=tokenizer_r,
-        tokenizer_g=tokenizer_g
-    )
-    d=collator(features)
-    # print(d['inputs_for_retriever'])
-    o=model(**d)
-    # print(o.keys())
-    # print(o.loss_g)
-
-    print(o.prompts_fbk[0])
-    for i, fbk in enumerate(o.feedbacks):
-        print('q,', dataset[i]['question'])
-        print('a,', dataset[i]['answers'])
-        print('fbk,', fbk)
+    # # [Model for RL]
+    # from modeling.rewards import MetricRewards
+    # reward_model = MetricRewards('rouge')
+    #
+    # # [Data]
+    # ## [NOTE] execute multithread once and wait
+    # from data.qampari import ContextQADataset, ContextQACollator
+    # train_dataset = ContextQADataset(
+    #     data_file=data_opt.train_file, 
+    #     n_max_segments=train_opt.n_max_segments,
+    #     n_max_candidates=train_opt.n_max_candidates,
+    #     budget=model_opt.num_budget,
+    #     depth=data_opt.depth,
+    #     corpus_file=data_opt.corpus_file,
+    #     retrieval_file=data_opt.retrieval_file,
+    #     quick_test=train_opt.quick_test
+    # )
+    #
+    # # [Data] data ollator
+    # ## [TODO] add sampler by action size (e.g., less to more)
+    # data_collator = ContextQACollator(
+    #     tokenizer_r=tokenizer_r,
+    #     tokenizer_g=tokenizer_g,
+    # )
+    #
+    # # [trainer]
+    # from ppov2_trainer import RAGPPOv2Trainer
+    # ppo_trainer = RAGPPOv2Trainer(
+	# config=train_opt,
+	# tokenizer=tokenizer_g,
+	# policy=model,
+	# ref_policy=ref_model,
+	# reward_model=reward_model,
+	# value_model=reward_model,
+	# train_dataset=train_dataset,
+	# data_collator=data_collator,
+    # )
+    # ppo_trainer.train()
+    #
 
 if __name__ == '__main__':
     main()

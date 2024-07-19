@@ -1,5 +1,5 @@
 # prompts for answering
-instruction_prompt = "Answer the given question using the provided documents as references (some of which might be irrelevant). The answer should be as comprehensive as possible."
+instruction_prompt = "Answer the given question using the provided documents (note that some documents may be irrelevant). List all the correct answers if multiple can be found."
 doc_prompt_template = "Document [{ID}]: (Title: {T}) {P}\n"
 demo_prompt_template = "{INST}\n\nQuestion: {Q}\n\n{D}\nAnswer: {A}"
 inst_prompt_template = "{INST}\n\n{DEMO}Question: {Q}\n\n{D}\n{PREFIX}"

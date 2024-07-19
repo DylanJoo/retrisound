@@ -1,5 +1,5 @@
 ---
-config_file: configs/basic.yaml
+config_file: configs/debug.yaml
 retriever_name_or_path: facebook/contriever-msmarco
 generator_name_or_path: TinyLlama/TinyLlama-1.1B-Chat-v0.6
 attn_implementation: flash_attention_2
@@ -7,7 +7,7 @@ train_file: /home/dju/datasets/qampari/train_data.jsonl
 corpus_file: /home/dju/datasets/qampari/wikipedia_chunks/chunks_v5
 retrieval_file: /home/dju/datasets/qampari/train_data_bm25-top100.run
 dataloader_num_workers: 16
-learning_rate: 0.0001
+learning_rate: 0.001
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.
@@ -17,4 +17,11 @@ output_dir: /ivi/ilps/personal/dju/checkpoints/adarag_testing
 num_train_epochs: 10
 save_steps: 1000
 logging_steps: 1
+total_episodes: 10000
+num_ppo_epochs: 4
+n_max_segments: 3
+n_max_candidates: 10
+num_budget: 5
+depth: 30
+whiten_rewards: true
 quick_test: 10

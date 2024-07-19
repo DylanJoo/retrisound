@@ -14,6 +14,8 @@ from transformers.modeling_outputs import BaseModelOutput
 from transformers import LlamaConfig, LlamaModel, LlamaForCausalLM
 from prompt.qampari import *
 
+from utils import get_expected_inputs
+
 @dataclass
 class RAGOutput(BaseModelOutput):
     loss: torch.FloatTensor = None
@@ -41,9 +43,15 @@ class RerankAugmentedGenerationWrapper(LlamaForCausalLM):
         self.is_reference = is_reference
         self.tokenizer = None
         self.biencoders = None
+        self.model.hello = nn.Linear(10, 1)
 
         for n, p in self.model.named_parameters():
-            p.requires_grad = False
+            if "embed_tokens" in n:
+                p.requires_grad = True
+            elif "hello" in n:
+                p.requires_grad = True
+            else:
+                p.requires_grad = False
 
     def set_tokenizer(self, tokenizer):
         self.tokenizer = tokenizer
@@ -118,39 +126,31 @@ class RerankAugmentedGenerationWrapper(LlamaForCausalLM):
         questions: List[str] = None,
         retriever_inputs: Optional[Dict] = None, 
         candidates: Optional[List[List[Dict]]] = None,
-        responses: List[torch.tensor] = None,
+        responses: torch.tensor = None,
         input_ids: torch.tensor = None,
         attention_mask: torch.tensor = None,
         **kwargs
     ):
-        """
-        params for generator
-        --------------------
-        retriever_inputs: [R] the recurrent query and document inputs
-
-        returns
-        -------
-        """
         ## step0. 
         loss, loss_r, loss_g = 0.0, 0.0, 0.0
 
-        if retriever_inputs is not None:
+        if input_ids is None:
             prompts, prompts_fbk, prompts_last, output_r = \
                 self._forward_retrieval(
                     **retriever_inputs, 
                     questions=questions, 
                     candidates=candidates
                 )
-
-            model_inputs = self.tokenizer(
+            queries = self.tokenizer(
                 prompts,
                 padding=True,
                 truncation=True,
                 return_tensors='pt',
-            ).to(self.model.device)
-            input_ids = model_inputs['input_ids']
-            attention_mask = model_inputs['attention_mask']
-            loss_r = output_r.loss 
+            ).input_ids.to(self.model.device)
+
+            if responses is not None:
+                input_ids = torch.cat([queries, responses], dim=1)
+                attention_mask = input_ids != self.tokenizer.pad_token_id
 
         output_g = super().forward(
             input_ids=input_ids, 
