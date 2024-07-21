@@ -100,11 +100,9 @@ class RMTEncoder(RMTBaseModel):
         # return {'outputs': out, 'embeds': torch.stack(ada_embeds, dim=1)} # B N_segs H
 
     def adaptive_pooling(self, out):
-        """
-        option1: average of [CLS] [MEM]
-        """
-        hidden_state = out.last_hidden_state[:, :(self.num_mem_tokens+1)].mean(1)
-        # hidden_state = out.last_hidden_state[:, 0]
+        """ option1: average of [CLS] [MEM] """
+        # hidden_state = out.last_hidden_state[:, :(self.num_mem_tokens+1)].mean(1)
+        hidden_state = out.last_hidden_state[:, 0]
         return hidden_state
         # option2: average of everything (but this is not like contriever only use segment1)
 

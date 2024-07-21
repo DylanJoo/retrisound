@@ -12,7 +12,7 @@ from typing import Optional, Tuple, Dict, List, Mapping
 from transformers import AutoModelForCausalLM
 from transformers.modeling_outputs import BaseModelOutput
 from transformers import LlamaConfig, LlamaModel, LlamaForCausalLM
-from prompt.qampari import *
+from prompts.qampari import *
 
 from utils import get_expected_inputs
 
@@ -43,13 +43,10 @@ class RerankAugmentedGenerationWrapper(LlamaForCausalLM):
         self.is_reference = is_reference
         self.tokenizer = None
         self.biencoders = None
-        self.model.hello = nn.Linear(10, 1)
 
         for n, p in self.model.named_parameters():
             if "embed_tokens" in n:
-                p.requires_grad = True
-            elif "hello" in n:
-                p.requires_grad = True
+                p.requires_grad = False
             else:
                 p.requires_grad = False
 

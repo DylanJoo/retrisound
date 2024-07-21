@@ -13,8 +13,7 @@ from .dist_utils import gather
 @dataclass
 class InBatchOutput(BaseModelOutput):
     loss: torch.FloatTensor = None
-    reranking: Optional[torch.FloatTensor] = None
-    indices: Optional[List] = None
+    scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
 
 class InBatchInteraction(nn.Module):
@@ -24,19 +23,12 @@ class InBatchInteraction(nn.Module):
         opt, 
         q_encoder, 
         d_encoder=None,
-        miner=None, 
-        fixed_d_encoder=False
     ):
         super().__init__()
         self.opt = opt
         self.q_encoder = q_encoder
-        self.d_encoder = d_encoder if d_encoder is not None else copy.deepcopy(q_encoder)
-
-        # distributed 
-        # self.is_ddp = dist.is_initialized()
-        self.is_ddp = False
-
-        # learning hyperparameter
+        self.d_encoder = d_encoder
+        self.is_ddp = dist.is_initialized()
         self.tau = opt.tau
 
         ## negative miner
@@ -47,25 +39,17 @@ class InBatchInteraction(nn.Module):
         self, 
         q_tokens, q_mask, 
         d_tokens, d_mask, 
-        data_index=None,
         **kwargs
     ):
-        loss = 0.0
-        loss_ret = 0.0
-        batch_size = len(q_tokens)
-        max_length = d_tokens[0]
+        loss, loss_r = 0.0, 0.0
+        n_candidates = len(d_tokens[0])
+        n_segments = len(q_tokens[0])
 
-        qembs = self.q_encoder(
-            input_ids=q_tokens, 
-            attention_mask=q_mask
-        ).last_hidden_state  # B N_seg H
+        qembs = self.q_encoder(q_tokens, q_mask).last_hidden_state  # B N_seg H
 
         dembs = []
-        for i in range(len(d_tokens)):
-            demb = self.d_encoder(
-                input_ids=d_tokens[i], 
-                attention_mask=d_mask[i]
-            ).emb  # B H
+        for i in range(n_segments):
+            demb = self.d_encoder(d_tokens[i], d_mask[i]).emb  # B H
             dembs.append(demb)
         dembs = torch.stack(dembs, dim=1) # B N_cand H
 
@@ -73,7 +57,6 @@ class InBatchInteraction(nn.Module):
         ### q <- qembs[b, :, :] N_seg H 
         ### d <- dembs[b, :, :] N_cand H 
         ### ranking (candidates) <- N_seg N_cand
-        reranking = []
         alpha = 0
         # for b in range(batch_size):
         #     score = qembs[b] @ demb[b].T # (N_seg H) x (N_cand H)
@@ -83,9 +66,16 @@ class InBatchInteraction(nn.Module):
         # print(reranking)
         # reranking = torch.stack(reranking, dim=0)
 
-        scores = qembs @ dembs.mT # (B N_seg H) x (B N_cand H) = B N_seg N_cand
-        r_ranking = 1/(alpha + 1 + (-scores).argsort(-1)) # reciprocal
-        reranking = r_ranking.sum(-2).argsort(-1).detach() # B N_cand
+        sim_scores = qembs @ dembs.mT # (B N_seg H) x (B N_cand H) = B N_seg N_cand
+        sim_scores = torch.max(sim_scores, 1).values
+
+        ## mode1: esemble scores
+        # sorted_items = torch.sort(pooled_socres, descending=True) 
+        # ranking = sorted_items.indices
+
+        ## mode1: reciprocal
+        # ranking_scores = 1/(alpha + 1 + (-scores).argsort(-1)) 
+        # reranking = ranking_scores.sum(-2).argsort(-1) # B N_cand
 
         ## 2) constrastive learning
         ### q <- qembs[:, 0, :] B (1) H. the first segment
@@ -114,8 +104,7 @@ class InBatchInteraction(nn.Module):
 
         return InBatchOutput(
             loss=loss_ret,
-            reranking=reranking,
-            indices=data_index,
+            scores=sim_scores,
             logs=logs, 
         )
 

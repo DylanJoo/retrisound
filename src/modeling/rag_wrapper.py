@@ -1,7 +1,3 @@
-"""
-# computing additional alignment loss
-KLLoss = nn.KLDivLoss(reduction='batchmean')
-"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
