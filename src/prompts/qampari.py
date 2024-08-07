@@ -1,32 +1,31 @@
 # prompts for answering
-instruction_prompt = "Answer the given question using the provided documents (note that some documents may be irrelevant). List all the correct answers if multiple can be found."
-doc_prompt_template = "Document [{ID}]: (Title: {T}) {P}\n"
-demo_prompt_template = "{INST}\n\nQuestion: {Q}\n\n{D}\nAnswer: {A}"
-inst_prompt_template = "{INST}\n\n{DEMO}Question: {Q}\n\n{D}\n{PREFIX}"
-demo_sep = "\n\n"
+instruction_prompt = "Answer the given question using the provided search results (some of which might be irrelevant)."
+doc_prompt_template = "[{ID}]: (Title: {T}) {P}\n"
+inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch results:\n{D}\n{PREFIX}"
 
-# promtps for asking feedback
-## with answer 
-# TBD
-
-## without answer 
-fbk_inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\n{D}\n{PREFIX}"
+## ===== WITHOUT ANSWER =====
+fbk_inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch results:\n{D}\n{PREFIX}"
 fbk_instruction_prompt = "Read and understand the given question. Then, based on the question, identify the useful information in the provided search results (some of which might be irrelevant)."
 
 ### (1) Instruction first + Query rewriting
-# fbk_prefix="Rewritten question: "
 # fbk_instruction_prompt += " Finally, rewrite the question for searching additional new documents. These new documents are expected to complete the missing knowledge about the question." 
+# fbk_prefix="Rewritten question: "
 
 ### (2) Instruction first + Query expansion
-# fbk_prefix="New keyword combintation:"
 # fbk_instruction_prompt += " Finally, write a new keyword combintation for searching additional new documents. These new documents are expected to complete the missing knowledge about the question." 
+# fbk_prefix="New keyword combintation:"
 
-### prompt separately
-### (3) Instruction later + Query rewriting
-# fbk_prefix="Based on the identified useful information, rewrite the question for searching additional additional new documents. These new documents are expected to complete the missing knowledge about the question.\n\nRewritten question:"
+## [Two-part instructions] One for identifying gap, one for reasoning the task. romtps for asking feedback
+## (3) Instruction later + Query rewriting
+# fbk_instruction_prompt = "Read and understand the given question. Then, based on the question, identify the useful information in the provided search results (some of which might be irrelevant)."
+# fbk_prefix="In addition to the provided search results, rewrite a next question for next searching. These additional new documents are expected to complete the missing knowledge about the question.\n\nRewritten next question:"
 
 ### (4) Instruction later + Query expansion
+fbk_instruction_prompt = "Read and understand the given question. Then, based on the question, identify the useful information in the provided search results (some of which might be irrelevant)."
 fbk_prefix="Based the identified useful information, write a new new keyword combination for searching additional new documents. These new documents are expected to complete the missing knowledge about the question.\n\nNew keyword combination: "
+
+## with answer 
+# TBD
 
 def apply_docs_prompt(doc_items, field='text'):
     p = ""
@@ -37,12 +36,6 @@ def apply_docs_prompt(doc_items, field='text'):
         p_doc = p_doc.replace("{P}", doc_item[field])
         p += p_doc
     return p
-
-# def apply_demo_prompt(Q, D, A, instruction=""):
-#     p = demo_prompt_template
-#     p = p.replace("{INST}", instruction).strip()
-#     p = p.replace("{Q}", Q).replace("{D}", D).replace("{A}", A)
-#     return p
 
 def apply_inst_prompt(Q, D, instruction="", prefix=""):
     p = inst_prompt_template

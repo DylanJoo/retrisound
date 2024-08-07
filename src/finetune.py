@@ -74,10 +74,6 @@ def main():
             os.makedirs(train_opt.output_dir, exist_ok=True)
 
     accelerator.wait_for_everyone()
-    # from transformers import AutoModel
-    # test = AutoModel.from_pretrained('bert-base-uncased', torch_dtype=torch.float16)
-    # print(test.embeddings.word_embeddings)
-    # print(test.embeddings.word_embeddings.weight)
 
     # [Retriever Bi-encoder]
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)

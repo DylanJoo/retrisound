@@ -1,8 +1,10 @@
+import re
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import evaluate
 from prompts.qampari import *
+from torch.nn import CrossEntropyLoss
 
 """
 llm = AutoModelForCausalLM.from_pretrained(
@@ -24,25 +26,55 @@ class Metric:
     def __init__(self, evaluation_metric='rouge'):
         self.model = evaluate.load(evaluation_metric)
 
-    def compute(self, xs, ys):
-        results = self.model.compute(predictions=xs, references=ys, use_aggregator=False)
+    def compute(self, **kwargs):
+        results = self.model.compute(**kwargs)
         results = torch.tensor(results['rouge1'])
         return results
 
 class GenerativeRewardWrapper(nn.Module):
 
-    def __init__(self, generator, tokenizer, reward_model):
+    def __init__(self, generator, tokenizer, utility, generation_config):
+        super().__init__()
         self.generator = generator
         self.tokenizer = tokenizer
-        self.reward_model = reward_model
+        self.utility = utility
+        self.generator.generation_config = generation_config
+        # freeze params
+        for n, p in self.generator.named_parameters():
+            p.requires_grad = False
+
+    # def inference(
+    #     self, 
+    #     queries=None,
+    #     query_tensors=None, 
+    #     batch_size=None
+    # ):
+    #     if batch_size is None:
+    #         return self._inference(queries, query_tensors, responses)
+    #     else:
+    #         query_tensors, response_tensors, responses = [], [], []
+    #         for i in range(0, queries.shape[0], batch_size):
+    #             b_queries = queries[i: i+batch_size]
+    #             if query_tensors is not None:
+    #                 qt, rt, r = self._inference(
+    #                     query_tensors=query_tensors[i: i+batch_size],
+    #                 )
+    #             else:
+    #                 qt, rt, r = self._inference(
+    #                     queries=queries[i: i+batch_size],
+    #                 )
+    #             query_tensors.append(qt)
+    #             response_tensors.append(rt)
+    #             responses.append(r)
+    #         query_tensors = torch.cat(query_tensors, 0)
+    #         response_tensors = torch.cat(response_tensors, 0)
+    #         responses += r
+    #         return query_tensors, response_tensors, responses
 
     def _inference(
         self, 
         queries=None,
         query_tensors=None, 
-        responses=None,
-        response_tensors=None,
-        **generation_configs
     ):
         default = self.tokenizer.padding_side
 
@@ -60,40 +92,129 @@ class GenerativeRewardWrapper(nn.Module):
             query_masks = (query_tensors != self.tokenizer.pad_token_id)
 
         # 1. get response if needed
-        if responses is None:
-            response_outputs = self.generator.generate(
-                input_ids=query_tensors,
-                attention_mask=query_masks,
-                **generation_configs
-            )
-            responses = self.tokenizer.batch_decode(
-                response_outputs[:, query_tensors.shape[1]:],
-                skip_special_tokens=True
-            )
-            ## response_outputs sometimes != response_tensors
+        response_outputs = self.generator.generate(
+            input_ids=query_tensors,
+            attention_mask=query_masks,
+            do_sample=True,
+            temperature=0.5,
+            top_p=0.95,
+        )
+        responses = self.tokenizer.batch_decode(
+            response_outputs[:, query_tensors.shape[1]:],
+            skip_special_tokens=True
+        )
+        responses = [self.normalize(r) for r in responses]
 
         # 2. get response tensors # should be in the same length
-        if response_tensors is None:
-            self.tokenizer.padding_side = 'right'
-            response_tensors = self.tokenizer(
-                responses, 
-                padding=True,
-                truncation=True,
-                return_tensors='pt'
-            ).input_ids.to(self.generator.device)
+        self.tokenizer.padding_side = 'right'
+        response_tensors = self.tokenizer(
+            responses, 
+            padding=True,
+            truncation=True,
+            return_tensors='pt'
+        ).input_ids.to(self.generator.device)
 
-        test = [self.tokenizer.convert_ids_to_tokens(r) for r in response_tensors]
-
-        return query_tensors, response_tensors, responses, test
+        # test = [self.tokenizer.convert_ids_to_tokens(r) for r in response_tensors]
+        # return query_tensors, response_tensors, responses, test
+        return query_tensors, response_tensors, responses
 
     def get_rewards(self, predictions, targets):
-        results = self.reward_model.compute(
+        results = self.utility.compute(
             predictions=predictions,
             references=targets,
             use_aggregator=False
         )
-        results = torch.tensor(results['rouge1'])
         return results
+
+    @staticmethod
+    def normalize(texts):
+        texts = texts.strip()
+        pattern = re.compile(r"\s+")
+        texts = re.sub(pattern, ' ', texts).strip()
+        pattern = re.compile(r"\n")
+        texts = re.sub(pattern, ' ', texts).strip()
+        return texts
+
+    @torch.no_grad()
+    def get_likelihood(
+        self, 
+        queries=None,
+        query_tensors=None,
+        targets=None,
+        max_length=2048,
+    ):
+        device = self.generator.device
+
+        self.tokenizer.padding_side = 'right'
+        target_tensors = self.tokenizer(
+            targets,
+            padding=True,
+            truncation=True,
+            return_tensors='pt'
+        )['input_ids'].to(device)
+        max_length = self.generator.config.max_position_embeddings 
+        target_length = target_tensors.size(1)
+        max_query_length = max_length - target_length
+
+        if query_tensors is None:
+            self.tokenizer.padding_side = 'left'
+            query_tensors = self.tokenizer(
+                queries,
+                padding=True,
+                truncation=True,
+                return_tensors='pt',
+                max_length=max_query_length
+            )['input_ids'].to(device)
+
+        query_tensors = query_tensors[:, :max_query_length]
+
+        # craft inputs
+        input_ids = torch.cat( [query_tensors, target_tensors], -1)
+        attention_mask = (input_ids != self.tokenizer.pad_token_id).to(device)
+        position_ids = attention_mask.cumsum(1) - attention_mask.long()  
+
+        logits = self.generator(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            labels=None
+        ).logits
+
+        # target_logits = logits[:, -target_length:-1, :]
+        target_logits = logits[:, -target_length:, :]
+        label_tensors = input_ids.clone()
+        label_tensors[label_tensors == self.tokenizer.pad_token_id] = -100
+        label_tensors = label_tensors[..., -target_length:]
+        del input_ids
+        torch.cuda.empty_cache()
+
+        target_lengths = [len(mask!=0) for mask in attention_mask[..., -target_length:]]
+        neg_likelihood = self.compute_nll(target_logits, label_tensors, target_lengths)
+        return -neg_likelihood
+
+    def compute_nll(self, logits, labels, lengths=None):
+        ## extract the batch-wise mean
+        batch_size, _, vocab_size = logits.shape
+        # Shift so that tokens < n predict n
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        # Flatten the tokens
+        loss_fct = CrossEntropyLoss(reduction='none')
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        nll = loss_fct(shift_logits, shift_labels).view(batch_size, -1)
+
+        nll_to_return = []
+        if lengths is not None:
+            for i, length in enumerate(lengths):
+                nll_to_return.append(nll[i, :length].mean())
+            nll_to_return = torch.tensor(nll_to_return).flatten()
+        else:
+            nll_to_return = nll.view(batch_size, -1).mean(-1)
+
+        return nll_to_return.flatten()
 
     # @torch.no_grad()
     # def get_values(

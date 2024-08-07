@@ -1,8 +1,8 @@
 #!/bin/sh
 #SBATCH --job-name=adarag
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_rtx_a6000:2
-#SBATCH --mem=120G
+#SBATCH --gres=gpu:nvidia_rtx_a6000:1
+#SBATCH --mem=60G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
@@ -18,9 +18,9 @@ index_dir=${HOME}/indexes/qampari
 data_dir=${HOME}/datasets/qampari
 
 # Setups
-NUM_GPUS=2
+NUM_GPUS=1
 BATCH_SIZE_PER_GPU=4
-TOTAL_BATCH_SIZE=32
+TOTAL_BATCH_SIZE=8
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints

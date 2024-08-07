@@ -26,3 +26,4 @@ n_max_segments: 3
 num_steps: 2
 quick_test: 10
 low_cpu_mem_usage: True
+reward_function: likelihood

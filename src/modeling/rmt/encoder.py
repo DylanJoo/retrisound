@@ -17,6 +17,7 @@ class RMTEncoder(RMTBaseModel):
         self, 
         input_ids, 
         attention_mask=None, 
+        include_n_feedbacks=None, 
         token_type_ids=None, 
         position_ids=None, 
         head_mask=None,
@@ -36,6 +37,10 @@ class RMTEncoder(RMTBaseModel):
         if isinstance(input_ids, list) is False:
             input_ids = [input_ids]
             attention_mask = [attention_mask]
+
+        # truncate if needed
+        input_ids = input_ids[:include_n_feedbacks]
+        attention_mask = attention_mask[:include_n_feedbacks]
 
         # use the first input_ids to setup memory
         memory = self.set_memory(input_ids[0].shape, device=input_ids[0].device)
@@ -102,6 +107,7 @@ class RMTEncoder(RMTBaseModel):
     def adaptive_pooling(self, out):
         """ option1: average of [CLS] [MEM] """
         # hidden_state = out.last_hidden_state[:, :(self.num_mem_tokens+1)].mean(1)
+        """ option1: [CLS] """
         hidden_state = out.last_hidden_state[:, 0]
         return hidden_state
         # option2: average of everything (but this is not like contriever only use segment1)

@@ -3,19 +3,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 import copy
+import math
 
 import random
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List, Mapping
 from transformers.modeling_outputs import BaseModelOutput
-# from .dist_utils import gather
-from dist_utils import gather
+from .dist_utils import gather
+# from dist_utils import gather
 
 @dataclass
 class InBatchOutput(BaseModelOutput):
     loss: torch.FloatTensor = None
-    probs: Optional[torch.FloatTensor] = None
     logits: Optional[torch.FloatTensor] = None
+    all_scores: Optional[torch.FloatTensor] = None
+    ranking: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
 
 class RankingValueHead(nn.Module):
@@ -23,18 +25,17 @@ class RankingValueHead(nn.Module):
 
     def __init__(self, input_size, **kwargs):
         super().__init__()
-
-        self.summary = nn.Linear(input_size, 1)
+        self.fc_1 = nn.Linear(input_size, 768)
+        self.fc_2 = nn.Linear(768, 1)
         summary_dropout_prob = kwargs.pop("summary_dropout_prob", 0.0)
         self.dropout = nn.Dropout(summary_dropout_prob) if summary_dropout_prob != 0.0 else nn.Identity()
 
     def forward(self, logits):
         output = self.dropout(logits)
-
-        if output.dtype != self.summary.weight.dtype:
-            output = output.to(self.summary.weight.dtype)
-
-        output = self.summary(output)
+        if output.dtype != self.fc_1.weight.dtype:
+            output = output.to(self.fc_1.weight.dtype)
+        # output = self.summary(output).squeeze(-1)
+        output = self.fc_2(self.fc_1(output))
         return output
 
 class AdaptiveReranker(nn.Module):
@@ -44,7 +45,7 @@ class AdaptiveReranker(nn.Module):
         opt, 
         q_encoder, 
         d_encoder=None,
-        n_candidates=10,
+        n_max_candidates=10,
         do_contrastive=False,
     ):
         super().__init__()
@@ -53,9 +54,17 @@ class AdaptiveReranker(nn.Module):
         self.d_encoder = d_encoder
         self.is_ddp = dist.is_initialized()
         self.tau = opt.tau
-        self.vhead = RankingValueHead(input_size=10)
-
+        self.vhead = RankingValueHead(input_size=n_max_candidates)
+        self.n_max_candidates = n_max_candidates
         self.do_contrastive = do_contrastive
+
+        self.scaling = math.sqrt(self.q_encoder.model.config.hidden_size)
+
+        for n, p in self.named_parameters():
+            if 'd_encoder' in n:
+                p.requires_grad = False
+            else:
+                p.requires_grad = True
 
     def forward(
         self, 
@@ -67,8 +76,9 @@ class AdaptiveReranker(nn.Module):
         n_segments = len(q_tokens)
         n_candidates = len(d_tokens)
         batch_size = q_tokens[0].size(0)
+        include_n_feedbacks = kwargs.pop('include_n_feedbacks', n_segments)
 
-        qembs = self.q_encoder(q_tokens, q_mask).last_hidden_state  # B N_seg H
+        qembs = self.q_encoder(q_tokens, q_mask, include_n_feedbacks).last_hidden_state  # B N_seg H
 
         dembs = []
         for i in range(n_candidates):
@@ -81,24 +91,24 @@ class AdaptiveReranker(nn.Module):
         # alpha = 0
         # r_ranking = 1/(alpha + 1 + (-score).argsort(-1)) # reciprocal
 
-        ### mode1: max pooling over segmentes
-        sim_logits = qembs @ dembs.mT # B N_seg N_cand
-        probs = sim_logits
-        # probs = F.softmax(sim_logits, dim=1)
-        logits = torch.max(probs, 1).values
+        all_scores = qembs @ dembs.mT # B N_seg N_cand
+        # scores = scores / self.scaling
+        logits = scores = torch.max(all_scores, 1).values # B N_cand
+        ranking = (-scores).argsort(-1) # B N_cand
 
-        ## mode1: reciprocal
-        # ranking_scores = 1/(alpha + 1 + (-scores).argsort(-1)) 
-        # reranking = ranking_scores.sum(-2).argsort(-1) # B N_cand
+        ### mode1: max pooling over segmentes
+        ### mode2: max pooling over element-wise product
+        # all_logits = torch.einsum('ijk,ihk->ijhk', qembs, dembs) # B N_seg N_cand H
+        # logits = all_logits.max(1).values # B N_cand H
 
         ## 2) constrastive learning
         if self.do_contrastive:
             qemb_ibn = qembs[:, 0, :] # the first segment (B H)
             demb_ibn = dembs[:, 0, :] # 
 
-            if self.is_ddp:
-                gather_fn = gather
-                demb_ibn = gather_fn(demb_ibn)
+            # if self.is_ddp:
+            #     gather_fn = gather
+            #     demb_ibn = gather_fn(demb_ibn)
 
             labels = torch.arange(0, batch_size, dtype=torch.long, device=qemb_ibn.device)
             rel_scores = torch.einsum("id, jd->ij", qemb_ibn/self.tau, demb_ibn)
@@ -107,8 +117,9 @@ class AdaptiveReranker(nn.Module):
 
         return InBatchOutput(
             loss=loss_r,
-            probs=probs,
-            logits=logits,
+            logits=logits, # B N_cand H
+            all_scores=all_scores, # B N_cand
+            ranking=ranking,
             logs={'infoNCE': loss_r}
         )
 

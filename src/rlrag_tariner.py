@@ -247,7 +247,6 @@ class RAGRLTrainer(PPOv2Trainer):
             logits = []
             logprobs = []
             rankings = []
-            responses = []
             feedbacks = []
             rewards = []
             values = []
@@ -266,7 +265,7 @@ class RAGRLTrainer(PPOv2Trainer):
                     )
 
                 with torch.no_grad():
-                    # Action: scoring and sampling ranking # [Revise] 
+                    # Action: scoring and sampling ranking
                     outputs = policy(**retriever_inputs, include_n_feedbacks=t+1)
                     logit = outputs.logits
                     ranking, logprob = multiple_sample_and_log_probability(logit, 1, batch=True)
@@ -274,10 +273,12 @@ class RAGRLTrainer(PPOv2Trainer):
 
                     value = value_model(logit)
 
+                    # Reward
                     prompt, prompt_fbk = augmentation(
                         questions, candidates, ranking, args.n_contexts
                     )
 
+                    ## [metric]
                     if args.reward_function == 'metric':
                         response = []
                         #### [TODO] write a batch generation function
@@ -287,8 +288,11 @@ class RAGRLTrainer(PPOv2Trainer):
                             response += b_response
 
                         reward = reward_model.get_rewards(response, targets).view(-1, 1).to(device)
+                        ### include documents
+                        # reward = reward_model.get_rewards([f"{p} {r}" for p, r in zip(prompt, response)], targets).view(-1, 1)
 
-                    if args.reward_function == 'likelihood':
+                    ## [likelihood] 
+                    elif args.reward_function == 'likelihood':
                         reward = []
                         gen_batch = len(prompt) if args.generation_batch is None else args.generation_batch
 
@@ -309,31 +313,25 @@ class RAGRLTrainer(PPOv2Trainer):
                         _, _, b_feedback = reward_model._inference(prompt_fbk[i:i+gen_batch])
                         feedback += b_feedback
 
-                    for i in range(len(data_indices)):
-                        self.train_dataset.add_feedback(data_indices[i], feedback[i])
-
                 # Feedback if applicable
                 # observations = retriever_inputs
                 logits.append(logit)
                 rankings.append(ranking)
                 logprobs.append(logprob)
                 feedbacks.append(feedback)
-                responses.append(response)
                 values.append(value)
                 rewards.append(reward) 
 
                 # (1) from value_model > generate > metric evaluation (2) from value_model > target likelihood
 
-                del (logit, ranking, logprob, value, reward)
+                del (logit, ranking, logprob, value, prompt, reward)
                 torch.cuda.empty_cache()
                 gc.collect()
 
             for i, q in enumerate(questions[:1]):
                 print("Q:", q)
-                print("RPS:", " -> ".join([f"[{r[i]}]" for r in responses]))
                 print("FBKs:", " -> ".join([f"[{f[i]}]" for f in feedbacks]))
-                # print("Rank", " -> ".join([str(r[i]) for r in rankings]))
-                print("prompt", prompt[i])
+                print("Rank", " -> ".join([str(r[i]) for r in rankings]))
 
             logits = torch.cat(logits, 1)       # B N_step N_cand
             rankings = torch.cat(rankings, 1)   # B N_step N_cand
@@ -343,24 +341,11 @@ class RAGRLTrainer(PPOv2Trainer):
             values = torch.cat(values, 1)       # B N_step
 
             # Advantage: next value and previous value comparison
-            # with torch.no_grad():
-            #     lastgaelam = 0
-            #     advantages_reversed = []
-            #     for t in reversed(range(0, args.num_steps + 1)):
-            #         next_values = values[:, t + 1] if t < args.num_steps else 0.0
-            #         delta = rewards[:, t] + args.gamma * next_values - values[:, t]
-            #         lastgaelam = delta + args.gamma * args.lam * lastgaelam
-            #         advantages_reversed.append(lastgaelam)
-
             with torch.no_grad():
-                advantages_reversed = []
                 lastgaelam = 0
-
+                advantages_reversed = []
                 for t in reversed(range(0, args.num_steps + 1)):
-                    if t == args.num_steps:
-                        next_values = 0.0
-                    else:
-                        next_values = values[:, t + 1] 
+                    next_values = values[:, t + 1] if t < args.num_steps - 1 else 0.0
                     delta = rewards[:, t] + args.gamma * next_values - values[:, t]
                     lastgaelam = delta + args.gamma * args.lam * lastgaelam
                     advantages_reversed.append(lastgaelam)
@@ -369,7 +354,6 @@ class RAGRLTrainer(PPOv2Trainer):
                 returns = advantages + values
                 torch.cuda.empty_cache()
 
-            print(advantages)
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size)
             clipfracs = []
@@ -389,14 +373,15 @@ class RAGRLTrainer(PPOv2Trainer):
                     new_logprobs = torch.zeros_like(mb_logprobs)
                     new_values = torch.zeros_like(mb_values)
 
-                    new_outputs = policy(**retriever_inputs, include_n_feedbacks=t+1) # B N_seg N_cand
-                    all_sim_scores = new_outputs.all_scores # B N_seg N_cand
-                    cont_loss = new_outputs.loss
-
                     for t in range(0, args.num_steps + 1):
-                        new_logit = torch.max(all_sim_scores[mb_inds, :(t+1)], 1).values
-                        _, new_logprob = multiple_sample_and_log_probability(new_logit, 1, batch=True)
+                        mb_retriever_inputs = get_mini_batch_dict(retriever_inputs, mb_inds)
+                        new_output = policy(**mb_retriever_inputs, include_n_feedbacks=t+1) 
+                        new_logit = new_output.logits
                         new_value = value_model(new_logit)
+
+                        cont_loss = new_output.loss
+
+                        _, new_logprob = multiple_sample_and_log_probability(new_logit, 1, batch=True)
 
                         new_logprobs[:, t] = new_logprob.flatten()
                         new_values[:, t] = new_value.flatten()
@@ -407,7 +392,7 @@ class RAGRLTrainer(PPOv2Trainer):
                     with torch.no_grad():
                         # calculate approx_kl http://joschu.net/blog/kl-approx.html
                         old_approx_kl = (-logratio).mean()
-                        approx_kl = ((ratio - 1) - logratio).mean()
+                        approx_kl = ((ratio - 0) - logratio).mean()
                         clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
 
                     if args.norm_adv:
@@ -435,18 +420,22 @@ class RAGRLTrainer(PPOv2Trainer):
                     else:
                         v_loss = 0.5 * ((new_value - mb_returns) ** 2).mean()
 
-                    loss = (pg_loss + v_loss * args.vf_coef) * args.rl_coef + (args.cont_coef * outputs.loss)
+                    loss = pg_loss + v_loss * args.vf_coef + cont_loss * args.cont_coef
+                    # loss = cont_loss * args.cont_coef
+                    # print(optimizer.param_groups[0])
+                    # print('before', policy.q_encoder.model.embeddings.word_embeddings.weight)
                     accelerator.backward(loss)
                     nn.utils.clip_grad_norm_(self.model.parameters(), args.max_grad_norm)
                     optimizer.step()
                     optimizer.zero_grad()
+                    # print('after', policy.q_encoder.model.embeddings.word_embeddings.weight)
 
                 if args.target_kl is not None and approx_kl > args.target_kl:
                     break
 
                 del (
                     mb_logprobs, mb_rewards, mb_values, mb_advantages, mb_returns, 
-                    new_logit, new_value, new_logprob
+                    new_output, new_logit, new_value, new_logprob
                 )
 
             torch.cuda.empty_cache()
@@ -521,6 +510,5 @@ class RAGRLTrainer(PPOv2Trainer):
 
         if not _internal_call:
             self.model = self.backup_model
-
 
 

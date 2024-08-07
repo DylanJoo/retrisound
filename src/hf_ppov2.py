@@ -62,6 +62,7 @@ def main():
         ),
         fixed_d_encoder=True
     )
+
     # [Generatir Config & tokenizer & Model]
     ## [TODO] Check further the accurate setup of tokenizer for llama
     from utils import update_tokenizer
