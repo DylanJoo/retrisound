@@ -46,7 +46,7 @@ def main():
     from modeling import RMTEncoder, AdaptiveReranker, Contriever
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     ada_encoder = RMTEncoder(
-        base_model=Contriever.from_pretrained("facebook/contriever-msmarco"),
+        base_model=Contriever.from_pretrained('bert-base-uncased'),
         tokenizer=tokenizer_r,
         num_mem_tokens=model_opt.num_mem_tokens,
         n_max_segments=train_opt.n_max_segments,
@@ -80,6 +80,7 @@ def main():
         attn_implementation=model_opt.attn_implementation,
         torch_dtype=torch.bfloat16,
     ).eval()
+        # load_in_4bit=True
 
     # [RAG]
     generation_config = init_generation_config(model_opt, tokenizer_g)

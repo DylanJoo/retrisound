@@ -95,9 +95,6 @@ class GenerativeRewardWrapper(nn.Module):
         response_outputs = self.generator.generate(
             input_ids=query_tensors,
             attention_mask=query_masks,
-            do_sample=True,
-            temperature=0.5,
-            top_p=0.95,
         )
         responses = self.tokenizer.batch_decode(
             response_outputs[:, query_tensors.shape[1]:],

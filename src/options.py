@@ -70,4 +70,5 @@ class RLTrainOptions(PPOv2Config):
     reward_function: Optional[str] = field(default='metric')
     ampere_gpu: Optional[bool] = field(default=False)
     generation_batch: Optional[int] = field(default=None)
+    world_size: Optional[int] = field(default=1)
 

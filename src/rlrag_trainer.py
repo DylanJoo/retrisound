@@ -93,6 +93,7 @@ class RAGRLTrainer(PPOv2Trainer):
         accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
         self.accelerator = accelerator
         args.world_size = accelerator.num_processes
+        args.world_size = 1
         args.local_batch_size = (
             args.per_device_train_batch_size * args.gradient_accumulation_steps * args.num_mini_batches
         )
@@ -104,6 +105,12 @@ class RAGRLTrainer(PPOv2Trainer):
         args.local_mini_batch_size = exact_div(
             args.local_batch_size, args.num_mini_batches, "`local_batch_size` must be a multiple of `num_mini_batches`"
         )
+        print('local_batch_size', args.local_batch_size)
+        print('micro_batch_size', args.micro_batch_size)
+        print('batch_size', args.batch_size)
+        print('mini_batch_size', args.mini_batch_size)
+        print('local_mini_batch_size', args.local_mini_batch_size)
+
         if args.whiten_rewards:
             assert (
                 args.local_mini_batch_size >= 8
@@ -369,7 +376,6 @@ class RAGRLTrainer(PPOv2Trainer):
                 returns = advantages + values
                 torch.cuda.empty_cache()
 
-            print(advantages)
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size)
             clipfracs = []
