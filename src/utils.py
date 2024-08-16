@@ -1,6 +1,5 @@
 import torch.nn as nn
 import torch
-from prompts.qampari import *
 from transformers import GenerationConfig
 
 def init_generation_config(model_opt, tokenizer):
@@ -32,14 +31,81 @@ def update_tokenizer(tokenizer, pad_token='[PAD]'):
 
     return tokenizer
 
-def augmentation(questions, candidates, rankings, n_context):
-    """
-    questions `List[str]`
-    candidates `List[List[str]]`
-    rankings `List[List[str]]`
-    """
+def augmentation_response(questions, candidates, rankings, n_context, dataset_prefix='asqa'):
     # prepare contexts
     assert len(candidates) == rankings.size(0)
+
+    ## loading dependencies
+    if 'asqa' in dataset_prefix:
+        from prompts.asqa import *
+
+    if 'qampari' in dataset_prefix:
+        from prompts.qampari import *
+
+    contexts = []
+    for i in range(len(rankings)):
+        reranked_context = [candidates[i][j] for j in rankings[i]]
+        contexts.append(reranked_context[:n_context])
+
+    # prepare prompts
+    prompts = []
+
+    for i in range(len(questions)):
+        ## for answering
+        D = apply_docs_prompt(contexts[i], field='text')
+        prompt = apply_inst_prompt(
+            Q=questions[i], 
+            D=D,
+            instruction=instruction_prompt,
+            prefix="Answer:\n"
+        ).replace('{DEMO}', '')
+        prompts.append(prompt)
+
+    return prompts
+
+def augmentation_feedback(questions, candidates, rankings, n_context, dataset_prefix='asqa'):
+    # prepare contexts
+    assert len(candidates) == rankings.size(0)
+
+    ## loading dependencies
+    if 'asqa' in dataset_prefix:
+        from prompts.asqa import *
+
+    if 'qampari' in dataset_prefix:
+        from prompts.qampari import *
+
+    contexts = []
+    for i in range(len(rankings)):
+        reranked_context = [candidates[i][j] for j in rankings[i]]
+        contexts.append(reranked_context[:n_context])
+
+    # prepare prompts
+    prompts = []
+
+    for i in range(len(questions)):
+        ## for answering
+        D = apply_docs_prompt(contexts[i], field='text')
+        prompt_fbk = apply_fbk_inst_prompt(
+            Q=questions[i], 
+            D=D,
+            instruction=fbk_instruction_prompt,
+            prefix=fbk_prefix
+        )
+        prompts_fbk.append(prompt_fbk)
+
+    return prompts
+
+def augmentation(questions, candidates, rankings, n_context, dataset_prefix='asqa'):
+    # prepare contexts
+    assert len(candidates) == rankings.size(0)
+
+    ## loading dependencies
+    if 'asqa' in dataset_prefix:
+        from prompts.asqa import *
+
+    if 'qampari' in dataset_prefix:
+        from prompts.qampari import *
+
     contexts = []
     for i in range(len(rankings)):
         reranked_context = [candidates[i][j] for j in rankings[i]]
