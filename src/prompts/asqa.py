@@ -35,16 +35,16 @@ def apply_docs_prompt(doc_items, field='text'):
         p += p_doc
     return p
 
-def apply_inst_prompt(Q, D, instruction="", prefix=""):
+def apply_rsp_inst_prompt(Q, D, instruction="", prefix="Answer: "):
     p = inst_prompt_template
     p = p.replace("{INST}", instruction).strip()
-    p = p.replace("{Q}", Q).replace("{D}", D).replace("{A}", "")
+    p = p.replace("{Q}", Q).replace("{D}", D)
     p = p.replace("{PREFIX}", prefix).strip()
     return p
 
-def apply_fbk_inst_prompt(Q, D, instruction="", prefix=""):
+def apply_fbk_inst_prompt(Q, D, A, instruction="", prefix="New query: "):
     p = fbk_inst_prompt_template
     p = p.replace("{INST}", instruction).strip()
-    p = p.replace("{Q}", Q).replace("{D}", D)
+    p = p.replace("{Q}", Q).replace("{D}", D).replace("{A}", "")
     p = p.replace("{PREFIX}", prefix).strip()
     return p
