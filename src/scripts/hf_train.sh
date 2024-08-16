@@ -56,7 +56,7 @@ deepspeed --num_gpus $NUM_GPUS train.py \
 	--num_steps 5 \
 	--reward_function metric \
 	--generation_batch 1 \
-	--cont_coef 1.0 \
+	--cont_coef 0.0 \
     --wandb_project retrisound \
     --quick_test 5000 \
     --max_steps 5000 \
