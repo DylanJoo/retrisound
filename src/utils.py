@@ -53,17 +53,17 @@ def augmentation_response(questions, candidates, rankings, n_context, dataset_pr
     for i in range(len(questions)):
         ## for answering
         D = apply_docs_prompt(contexts[i], field='text')
-        prompt = apply_inst_prompt(
+        prompt = apply_rsp_inst_prompt(
             Q=questions[i], 
             D=D,
             instruction=instruction_prompt,
             prefix="Answer:\n"
-        ).replace('{DEMO}', '')
+        )
         prompts.append(prompt)
 
     return prompts
 
-def augmentation_feedback(questions, candidates, rankings, n_context, dataset_prefix='asqa'):
+def augmentation_feedback(questions, answers, candidates, rankings, n_context, dataset_prefix='asqa'):
     # prepare contexts
     assert len(candidates) == rankings.size(0)
 
@@ -87,6 +87,7 @@ def augmentation_feedback(questions, candidates, rankings, n_context, dataset_pr
         D = apply_docs_prompt(contexts[i], field='text')
         prompt_fbk = apply_fbk_inst_prompt(
             Q=questions[i], 
+            A=answers[i],
             D=D,
             instruction=fbk_instruction_prompt,
             prefix=fbk_prefix

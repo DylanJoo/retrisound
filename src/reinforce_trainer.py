@@ -64,14 +64,27 @@ class Trainer(RewardTrainer):
 
             ### generation
             ### (1) response
-            prompt = augmentation_response(questions, candidates, ranking, args.n_contexts)
+            prompt = augmentation_response(
+                questions=questions, 
+                candidates=candidates, 
+                rankings=ranking, 
+                n_context=args.n_contexts,
+                dataset_prefix=self.train_opt.dataset_prefix
+            )
             response = []
             for i in range(0, len(prompt), gen_batch):
                 _, _, b_response = self.reward_model._inference(prompt[i:i+gen_batch])
                 response += b_response
 
             ### (2) feedback 
-            prompt = augmentation_feedback(questions, candidates, ranking, args.n_contexts)
+            prompt = augmentation_feedback(
+                questions=questions, 
+                answers=response,
+                candidates=candidates, 
+                rankings=ranking, 
+                n_context=args.n_contexts,
+                dataset_prefix=self.train_opt.dataset_prefix
+            )
             feedback = []
             for i in range(0, len(prompt_fbk), gen_batch):
                 _, _, b_feedback = reward_model._inference(prompt_fbk[i:i+gen_batch])
