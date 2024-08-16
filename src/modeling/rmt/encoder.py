@@ -17,6 +17,7 @@ class RMTEncoder(RMTBaseModel):
         self, 
         input_ids, 
         attention_mask=None, 
+        include_n_feedbacks=None, 
         token_type_ids=None, 
         position_ids=None, 
         head_mask=None,
@@ -36,6 +37,10 @@ class RMTEncoder(RMTBaseModel):
         if isinstance(input_ids, list) is False:
             input_ids = [input_ids]
             attention_mask = [attention_mask]
+
+        # truncate if needed
+        input_ids = input_ids[:include_n_feedbacks]
+        attention_mask = attention_mask[:include_n_feedbacks]
 
         # use the first input_ids to setup memory
         memory = self.set_memory(input_ids[0].shape, device=input_ids[0].device)
@@ -58,7 +63,11 @@ class RMTEncoder(RMTBaseModel):
             segment_attention_mask = attention_mask[seg_num]
             non_empty_mask = [len(s) > 2 for s in segment_input_ids]
             if sum(non_empty_mask) == 0:
+                # print('jump', seg_num)
                 continue # skip this loop if all are empty
+            else:
+                pass
+                # print('keep', seg_num)
 
             ## expand input_ids with memory and special tokens
             segment_input_ids, segment_attention_mask = self.add_special_tokens_and_masks(
@@ -96,10 +105,10 @@ class RMTEncoder(RMTBaseModel):
         # return {'outputs': out, 'embeds': torch.stack(ada_embeds, dim=1)} # B N_segs H
 
     def adaptive_pooling(self, out):
-        """
-        option1: average of [CLS] [MEM] [SEP]
-        """
-        hidden_state = out.last_hidden_state[:, :(self.num_mem_tokens+2)].mean(1)
+        """ option1: average of [CLS] [MEM] """
+        # hidden_state = out.last_hidden_state[:, :(self.num_mem_tokens+1)].mean(1)
+        """ option1: [CLS] """
+        hidden_state = out.last_hidden_state[:, 0]
         return hidden_state
         # option2: average of everything (but this is not like contriever only use segment1)
 

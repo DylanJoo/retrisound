@@ -9,6 +9,14 @@ class RMTBaseModel(torch.nn.Module):
         self.model = base_model
         self.set_params(**rmt_kwargs)
 
+    # def save_pretrained(self, **kwargs):
+    #     # same func as the memory is actually the embedding layer. 
+    #     self.model.save_pretrained(**kwargs)
+    # @staticmethod
+    # def from_pretrained(self, **kwargs):
+    #     # Making sure the extened embeddings are loaded
+    #     return self.model.from_pretrained(**kwargs)
+
     def set_params(self, num_mem_tokens, tokenizer, **rmt_config):
         self.rmt_config = rmt_config
         self.extract_special_tokens(tokenizer)

@@ -14,7 +14,7 @@ from transformers.tokenization_utils_base import (
     PaddingStrategy, 
 )
 from .utils import load_corpus_file, batch_iterator # normal use case
-# from utils import load_corpus_file, batch_iterator # for unit test
+# from utils import load_corpus_file, batch_iterator # normal use case
 import sys
 
 class ContextQADataset(Dataset):
@@ -30,19 +30,18 @@ class ContextQADataset(Dataset):
         retrieval_file=None,
         quick_test=None
     ):
-        """
-        params
-        ------
-        n_max_segment: the max number of segments (exclude the initial q)
-        n_max_candidates: the max depth of considered intialized retrieval
-        depth: the pool size of psg for re-ranking as candidates may change
-        budget: the context size of psg for later generator to read
-
-        """
-        data = []
         with open(data_file, 'r') as f:
-            for line in f:
-                data.append(json.loads(line.strip()))
+            raw_data = json.load(f)['train']
+
+        data = []
+        for key_id in raw_data:
+            data.append({
+                "sample_id": key_id,
+                "question": raw_data[key_id]['ambiguous_question'],
+                "last_answer": raw_data[key_id]['annotations'][0]['long_answer'],
+                "sub_questions": [i['question'] for i in raw_data[key_id]['qa_pairs']],
+                "sub_answers": [i['short_answers'][0] for i in raw_data[key_id]['qa_pairs']],
+            })
 
         self.quick_test = quick_test 
         self.length = len(data)
@@ -52,9 +51,9 @@ class ContextQADataset(Dataset):
         ## fixed attributes 
         self.qids = [None] * self.length
         self.questions = [None] * self.length
-        self.answer_list = [[] for _ in range(self.length)]
-        self.proof = [[] for _ in range(self.length)] 
-        self.gold_context = [[] for _ in range(self.length)]
+        self.answers = [None] * self.length
+        self.sub_questions = [None] * self.length
+        self.sub_answers = [None] * self.length
         self.corpus = {-1: {'text': "", 'title': ""}}
 
         ## dynamic attributes
@@ -79,16 +78,11 @@ class ContextQADataset(Dataset):
 
     def _build(self, data):
         for idx in range(self.length):
-            self.qids[idx] = data[idx]['qid']
-            self.questions[idx] = data[idx]['question_text']
-
-            for answer in data[idx]['answer_list']:
-                self.answer_list[idx].append(answer['answer_text'])
-
-                for proof in answer['proof']:
-                    self.proof[idx].append(proof['proof_text'])
-                    self.gold_context[idx].append(proof['pid']) 
-                    # this is not actually the chunk_id for corpus
+            self.qids[idx] = data[idx]['sample_id']
+            self.questions[idx] = data[idx]['question']
+            self.answers[idx] = data[idx]['last_answer']
+            self.sub_questions[idx] = data[idx]['sub_questions']
+            self.sub_answers[idx] = data[idx]['sub_answers']
 
     def _load_retrieval(self, file):
         """
@@ -106,7 +100,7 @@ class ContextQADataset(Dataset):
 
     def _load_corpus(self, dir):
         from multiprocessing import Pool
-        files = glob(f'{dir}/*jsonl')
+        files = glob(f'{dir}/*jsonl*')
         if self.quick_test is not None:
             files = files[:10]
         for batch_files in tqdm(batch_iterator(files, 1000), 'load wiki files', total=1+len(files)//1000):
@@ -141,7 +135,7 @@ class ContextQADataset(Dataset):
         return {'index': idx,
                 'questions': self.questions[idx], 
                 'feedbacks': self.feedbacks[idx],
-                'answers': self.answer_list[idx],
+                'answers': self.answers[idx],
                 'candidate_pids': cand_pids, 
                 'candidates': [self.corpus[pid] for pid in cand_pids],} # this is for reranker 
 
@@ -162,7 +156,7 @@ class ContextQACollator(DefaultDataCollator):
         ------
         features: {
             'questions': [q1, q2, q3, ..., qB], 
-            'feebacks': [ [i11, i12, ..., i1n], ..., [iB1, iB2, ..., iBn] ], 
+            'feedbacks': [ [i11, i12, ..., i1n], ..., [iB1, iB2, ..., iBn] ], 
                 --> [ [i11, i21, ..., iB1], ..., [i1n, i2n, ..., iBn] ], 
             'answers': [[a11, a12, ...] , [a21, a22, ...]], 
                 --> 'labels': [y1, y2, ..., yn]
@@ -177,7 +171,7 @@ class ContextQACollator(DefaultDataCollator):
 
         batch['index'] = [f['index'] for f in features] # we record it 
         batch['questions'] = [f['questions'] for f in features] 
-        batch['targets'] = [", ".join(f['answers']) for f in features] 
+        batch['targets'] = [f['answers'] for f in features] 
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
         batch['candidate_pids'] = [f['candidate_pids'] for f in features] 

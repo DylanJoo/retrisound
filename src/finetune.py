@@ -30,13 +30,12 @@ from transformers import (
     get_scheduler,
 )
 
-from utils import init_tokenizer
+from utils import update_tokenizer
 
 logger = get_logger(__name__)
 
 
 def main():
-
 
     from options import ModelOptions, DataOptions, TrainOptions
     parser = HfArgumentParser((ModelOptions, DataOptions, TrainOptions))
@@ -75,10 +74,6 @@ def main():
             os.makedirs(train_opt.output_dir, exist_ok=True)
 
     accelerator.wait_for_everyone()
-    # from transformers import AutoModel
-    # test = AutoModel.from_pretrained('bert-base-uncased', torch_dtype=torch.float16)
-    # print(test.embeddings.word_embeddings)
-    # print(test.embeddings.word_embeddings.weight)
 
     # [Retriever Bi-encoder]
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
@@ -89,7 +84,7 @@ def main():
         tokenizer=tokenizer_r,
         num_mem_tokens=model_opt.num_mem_tokens,
         n_max_segments=train_opt.n_max_segments,
-        input_size=(256-model_opt.num_mem_tokens-3),
+        input_size=256,
         sum_loss=False,
     )
     from modeling.inbatch import InBatchInteraction
@@ -102,52 +97,57 @@ def main():
 
     # [Generatir Config & tokenizer & Model]
     ## [TODO] Check further the accurate setup of tokenizer for llama
+    from utils import update_tokenizer
     tokenizer_g = AutoTokenizer.from_pretrained(
             model_opt.generator_name_or_path, 
+            padding_side='right', # and we have to ignore the padding
             use_fast=True
     )
-    tokenizer_g, _= init_tokenizer(tokenizer_g, model_opt.use_special_tokens)
+    tokenizer_g = update_tokenizer(tokenizer_g, '<|reserved_special_token_0|>')
     config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
     generator = AutoModelForCausalLM.from_pretrained(
         model_opt.generator_name_or_path,
         config=config,
         low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
         attn_implementation=model_opt.attn_implementation, 
-    )
-    # We resize the embeddings only when necessary to avoid index errors. 
-    # If you are creating a model from scratch
-    # on a small vocab and want a smaller embedding size, remove this test.
-    embedding_size = generator.get_input_embeddings().weight.shape[0]
-    if len(tokenizer_g) > embedding_size:
-        generator.resize_token_embeddings(len(tokenizer_g))
+    ).eval()
+
+    stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
+    stop_token_ids = [tokenizer_g.eos_token_id] + [tokenizer_g.convert_tokens_to_ids(token) for token in stop]
+    stop_token_ids = list(set([token_id for token_id in stop_token_ids if token_id is not None]))  
 
     # [RAG]
     from modeling import RerankAugmentedGeneration
     model = RerankAugmentedGeneration(
         llm=generator,
         tokenizer=tokenizer_g,
-        biencoders=bi_encoders
+        biencoders=bi_encoders,
+        stop_token_ids=stop_token_ids,
+        k=model_opt.num_contexts
     )
+    ## the parameters freezed
     if train_opt.gradient_checkpointing:
         model.biencoders.q_encoder.model.gradient_checkpointing_enable()
         model.biencoders.d_encoder.gradient_checkpointing_enable()
         model.llm.gradient_checkpointing_enable()
 
-
     # [Data]
     from data.qampari import ContextQADataset, ContextQACollator
-    train_dataset = ContextQADataset(
-        data_file=data_opt.train_file, 
-        n_max_segments=train_opt.n_max_segments,
-        n_max_candidates=train_opt.n_max_candidates,
-        budget=model_opt.budget,
-        depth=data_opt.depth,
-        corpus_file=data_opt.corpus_file,
-        retrieval_file=data_opt.retrieval_file,
-        quick_test=train_opt.quick_test
-    )
-    logger.info(f"Sample 0: {train_dataset[0]}.")
-    logger.info(f"Sample 1: {train_dataset[1]}.")
+    ## [NOTE] execute multithread once and wait
+    with accelerator.main_process_first():
+        train_dataset = ContextQADataset(
+            data_file=data_opt.train_file, 
+            n_max_segments=train_opt.n_max_segments,
+            n_max_candidates=train_opt.n_max_candidates,
+            budget=model_opt.budget,
+            depth=data_opt.depth,
+            corpus_file=data_opt.corpus_file,
+            retrieval_file=data_opt.retrieval_file,
+            quick_test=train_opt.quick_test
+        )
+        logger.info(f"Sample 0: {train_dataset[0]}.")
+        logger.info(f"Sample 1: {train_dataset[1]}.")
+
     # eval_dataset = ContextQADataset(data_opt.eval_file)
 
     # [Data] dataloader with collator
@@ -166,16 +166,6 @@ def main():
 
     # [optimizer] Split weights in two groups, one with weight decay and the other not.
     no_decay = ["bias", "layer_norm.weight"]
-    # optimizer_grouped_parameters = [
-    #     {
-    #         "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) ],
-    #         "weight_decay": train_opt.weight_decay,
-    #     },
-    #     {
-    #         "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) ],
-    #         "weight_decay": 0.0,
-    #     },
-    # ]
     optimizer_grouped_parameters = [
         {
             "params": [p for n, p in model.named_parameters() if p.requires_grad and not any(nd in n for nd in no_decay) ],
@@ -186,8 +176,7 @@ def main():
             "weight_decay": 0.0,
         },
     ]
-
-    freezed = ['llm', 'd_encoder']
+    # freezed = ['llm', 'd_encoder']
 
     optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=train_opt.learning_rate)
 
@@ -272,6 +261,8 @@ def main():
     for epoch in range(starting_epoch, train_opt.num_train_epochs):
         model.train()
         total_loss = 0
+        total_loss_r = 0
+        total_loss_g = 0
         for step, batch in enumerate(train_dataloader):
             # We need to skip steps until we reach the resumed step
             if train_opt.resume_from_checkpoint and epoch == starting_epoch:
@@ -281,33 +272,58 @@ def main():
                         completed_steps += 1
                     continue
 
+
             with accelerator.accumulate(model):
+
+                indices = batch.pop('index', None)
+
+                ## 1. forward passing
                 outputs = model(**batch, use_cache=False)
+                feedbacks = outputs.feedbacks
                 loss = outputs.loss
+
+                ## 2. update the dataset with feedback on-the-fly
+                ## [NOTE] See if we need to gather feedbacks and indices 
+                if indices is not None:
+                    for i, idx in enumerate(indices):
+                        train_dataset.add_action(idx, feedbacks[i])
+
                 # We keep track of the loss at each logged step
+                total_loss_r += outputs.loss_r.detach().float()
+                total_loss_g += outputs.loss_g.detach().float()
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()       
 
-            # # Checks if the accelerator has performed an optimization step behind the scenes
+                ### [TODO] feeback updated on the fly
+                for i, feedback in enumerate(feedbacks):
+                    train_dataset.add_action(indices[i], feedback)
+
+            # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 completed_steps += 1
 
                 if train_opt.logging_steps and completed_steps % train_opt.logging_steps == 0:
                     avg_loss = accelerator.gather(total_loss).mean().item() / train_opt.gradient_accumulation_steps / train_opt.logging_steps
+                    avg_loss_r = accelerator.gather(total_loss_r).mean().item() / train_opt.gradient_accumulation_steps / train_opt.logging_steps
+                    avg_loss_g = accelerator.gather(total_loss_g).mean().item() / train_opt.gradient_accumulation_steps / train_opt.logging_steps
                     logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
                     if train_opt.with_tracking:
                         accelerator.log(
                             {
                                 "learning_rate": lr_scheduler.get_last_lr()[0],
                                 "train_loss": avg_loss,
+                                "train_loss_r": avg_loss_r,
+                                "train_loss_g": avg_loss_g,
                             },
                             step=completed_steps,
                         )
                     total_loss = 0
+                    total_loss_r = 0
+                    total_loss_g = 0
                     
                 if train_opt.save_strategy == 'steps':
                     if completed_steps % train_opt.save_steps == 0:
@@ -335,9 +351,14 @@ def main():
         # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
         # Otherwise, sometimes the model will be saved with only part of the parameters.
         # Also, accelerator needs to use the wrapped model to get the state_dict.
-        state_dict = accelerator.get_state_dict(model.biencoders.q_encoder)
-        unwrapped_model.save_pretrained(
-            train_opt.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
+        # state_dict = accelerator.get_state_dict(model.biencoders.q_encoder.model)
+        # unwrapped_model.save_pretrained(
+        #     train_opt.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
+        # )
+        # [NOTE] Since we only tuned bi-encoder's q-encoder
+        unwrapped_model.biencoders.q_encoder.model.save_pretrained(
+            train_opt.output_dir, 
+            is_main_process=accelerator.is_main_process
         )
 
 if __name__ == '__main__':
