@@ -29,13 +29,13 @@ from trl.trainer.ppov2_config import PPOv2Config
 class ReinforceOptions(RewardConfig):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     n_contexts: Optional[int] = field(default=5)
-    n_max_segments: Optional[int] = field(default=6)
+    n_max_segments: Optional[int] = field(default=2)
     n_max_candidates: Optional[int] = field(default=10)
     run_name: Optional[str] = field(default='testing')
     wandb_project: Optional[str] = field(default='adarag')
     max_steps: int = field(default=-1) # different from HF's  
     num_processes: Optional[int] = field(default=1)
-    num_steps: Optional[int] = field(default=2)
+    num_steps: Optional[int] = field(default=1)
     remove_unused_columns: Optional[bool] = field(default=False)
     learning_rate: float = field(default=5e-5)
     num_mini_batches: int = 2
@@ -49,13 +49,13 @@ class ReinforceOptions(RewardConfig):
 class RLTrainOptions(PPOv2Config):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     n_contexts: Optional[int] = field(default=5)
-    n_max_segments: Optional[int] = field(default=6)
+    n_max_segments: Optional[int] = field(default=2)
     n_max_candidates: Optional[int] = field(default=10)
     run_name: Optional[str] = field(default='testing')
     wandb_project: Optional[str] = field(default='adarag')
     max_steps: int = field(default=-1) # different from HF's  
     num_processes: Optional[int] = field(default=1)
-    num_steps: Optional[int] = field(default=2)
+    num_steps: Optional[int] = field(default=1)
     remove_unused_columns: Optional[bool] = field(default=False)
     learning_rate: float = field(default=5e-5)
     num_mini_batches: int = 2

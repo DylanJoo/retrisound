@@ -102,16 +102,31 @@ class Trainer(RewardTrainer):
         ### calculate rewards (on policy)
         reward = self.reward_model.get_rewards(response, targets).view(-1, 1).to(self.args.device)
         reward = reward.to(model.device)
+        self.log({"reward": reward.mean().item()})
 
         ## baseline can be the improved one-shot retrieval
         baseline = 0
         reinforce_loss = ((reward - baseline) * (-logprob)).mean()
-        loss = reinforce_loss
+        contrastive_loss = outputs.loss
+        loss = reinforce_loss + contrastive_loss
+
+        self.log({"loss/RL": reinforce_loss.mean().item()})
+        self.log({"loss/CT": contrastive_loss.mean().item()})
+
+        ## logging
+        if self.accelerator.is_main_process:
+	    table = 0
+            df = pd.DataFrame({"response": response, "feedback": feedback})
+            if "wandb" in args.report_to:
+                import wandb
+
+                if wandb.run is not None:
+                    wandb.log({"completions": wandb.Table(dataframe=df)})
 
         if return_outputs:
             return loss, {
-                "rewards_chosen": reward,
-                "rewards_rejected": None,
+                "rewards_chosen": response,
+                "rewards_rejected": feedback
             }
         return loss
 

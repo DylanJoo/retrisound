@@ -26,13 +26,15 @@ GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=facebook/contriever-msmarco
+BASE_RET=bert-base-uncased
 
-MODEL_SIZE=1.1B
-BASE_LLM=TinyLlama/TinyLlama-1.1B-Chat-v0.6
+MODEL_SIZE=1B
+BASE_LLM=allenai/OLMo-1B-hf
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
+    --main_process_port 29501 \
     --mixed_precision bf16 \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
@@ -47,9 +49,9 @@ accelerate launch \
 	--retrieval_file /home/dju/datasets/asqa/train_data_bm25-top100.run \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 5e-5 \
+    --learning_rate 1e-4 \
     --lr_scheduler_type linear \
-    --warmup_ratio 0.03 \
+    --warmup_ratio 0.1 \
     --weight_decay 0. \
     --num_train_epochs 1 \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
