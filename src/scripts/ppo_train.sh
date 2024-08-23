@@ -26,7 +26,7 @@ BASE_RET=facebook/contriever-msmarco
 MODEL_SIZE=8B
 BASE_LLM=meta-llama/Meta-Llama-3.1-8B-Instruct
 
-deepspeed --num_gpus $NUM_GPUS train.py \
+deepspeed --num_gpus $NUM_GPUS ppo_train.py \
     --num_processes $NUM_GPUS \
     --bf16 \
     --deepspeed configs/zero2_config_accelerate.json \

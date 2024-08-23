@@ -123,6 +123,10 @@ class AdaptiveReranker(nn.Module):
             logs={'infoNCE': loss_r}
         )
 
+    def gradient_checkpointing_enable(self, **kwargs):
+        self.q_encoder.model.gradient_checkpointing_enable(**kwargs)
+        self.d_encoder.gradient_checkpointing_enable(**kwargs)
+
     def get_encoder(self):
         return self.q_encoder, None
 

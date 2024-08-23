@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 from transformers import GenerationConfig
+from prompts import asqa, qampari
 
 def init_generation_config(model_opt, tokenizer):
     stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
@@ -37,10 +38,16 @@ def augmentation_response(questions, candidates, rankings, n_context, dataset_pr
 
     ## loading dependencies
     if 'asqa' in dataset_prefix:
-        from prompts.asqa import *
+        apply_docs_prompt = asqa.apply_docs_prompt
+        apply_rsp_inst_prompt = asqa.apply_rsp_inst_prompt
+        instruction_prompt = asqa.instruction_prompt
+        fbk_instruction_prompt = asqa.fbk_instruction_prompt
 
     if 'qampari' in dataset_prefix:
-        from prompts.qampari import *
+        apply_docs_prompt = qampari.apply_docs_prompt
+        apply_rsp_inst_prompt = qampari.apply_rsp_inst_prompt
+        instruction_prompt = qampari.instruction_prompt
+        fbk_instruction_prompt = qampari.fbk_instruction_prompt
 
     contexts = []
     for i in range(len(rankings)):
@@ -69,10 +76,16 @@ def augmentation_feedback(questions, answers, candidates, rankings, n_context, d
 
     ## loading dependencies
     if 'asqa' in dataset_prefix:
-        from prompts.asqa import *
+        apply_docs_prompt = asqa.apply_docs_prompt
+        apply_fbk_inst_prompt = asqa.apply_fbk_inst_prompt
+        fbk_instruction_prompt = asqa.fbk_instruction_prompt
+        prefix = asqa.fbk_prefix
 
     if 'qampari' in dataset_prefix:
-        from prompts.qampari import *
+        apply_docs_prompt = qampari.apply_docs_prompt
+        apply_fbk_inst_prompt = qampari.apply_fbk_inst_prompt
+        fbk_instruction_prompt = qampari.fbk_instruction_prompt
+        prefix = qampari.fbk_prefix
 
     contexts = []
     for i in range(len(rankings)):
@@ -85,60 +98,60 @@ def augmentation_feedback(questions, answers, candidates, rankings, n_context, d
     for i in range(len(questions)):
         ## for answering
         D = apply_docs_prompt(contexts[i], field='text')
-        prompt_fbk = apply_fbk_inst_prompt(
+        prompt = apply_fbk_inst_prompt(
             Q=questions[i], 
             A=answers[i],
             D=D,
             instruction=fbk_instruction_prompt,
-            prefix=fbk_prefix
+            prefix=prefix
         )
-        prompts_fbk.append(prompt_fbk)
+        prompts.append(prompt)
 
     return prompts
 
-def augmentation(questions, candidates, rankings, n_context, dataset_prefix='asqa'):
-    # prepare contexts
-    assert len(candidates) == rankings.size(0)
-
-    ## loading dependencies
-    if 'asqa' in dataset_prefix:
-        from prompts.asqa import *
-
-    if 'qampari' in dataset_prefix:
-        from prompts.qampari import *
-
-    contexts = []
-    for i in range(len(rankings)):
-        reranked_context = [candidates[i][j] for j in rankings[i]]
-        contexts.append(reranked_context[:n_context])
-
-    # prepare prompts
-    prompts = []
-    prompts_fbk = []  
-    prompts_last = [] 
-
-    for i in range(len(questions)):
-        ## for answering
-        D = apply_docs_prompt(contexts[i], field='text')
-        prompt = apply_inst_prompt(
-            Q=questions[i], 
-            D=D,
-            instruction=instruction_prompt,
-            prefix="Answer:\n"
-        ).replace('{DEMO}', '')
-        prompts.append(prompt)
-
-        ## for getting feedback
-        prompt_fbk = apply_fbk_inst_prompt(
-            Q=questions[i], 
-            D=D,
-            instruction=fbk_instruction_prompt,
-            prefix=fbk_prefix
-        )
-        prompts_fbk.append(prompt_fbk)
-
-
-    return prompts, prompts_fbk
+# def augmentation(questions, candidates, rankings, n_context, dataset_prefix='asqa'):
+#     # prepare contexts
+#     assert len(candidates) == rankings.size(0)
+#
+#     ## loading dependencies
+#     if 'asqa' in dataset_prefix:
+#         from prompts.asqa import *
+#
+#     if 'qampari' in dataset_prefix:
+#         from prompts.qampari import *
+#
+#     contexts = []
+#     for i in range(len(rankings)):
+#         reranked_context = [candidates[i][j] for j in rankings[i]]
+#         contexts.append(reranked_context[:n_context])
+#
+#     # prepare prompts
+#     prompts = []
+#     prompts_fbk = []  
+#     prompts_last = [] 
+#
+#     for i in range(len(questions)):
+#         ## for answering
+#         D = apply_docs_prompt(contexts[i], field='text')
+#         prompt = apply_inst_prompt(
+#             Q=questions[i], 
+#             D=D,
+#             instruction=instruction_prompt,
+#             prefix="Answer:\n"
+#         ).replace('{DEMO}', '')
+#         prompts.append(prompt)
+#
+#         ## for getting feedback
+#         prompt_fbk = apply_fbk_inst_prompt(
+#             Q=questions[i], 
+#             D=D,
+#             instruction=fbk_instruction_prompt,
+#             prefix=fbk_prefix
+#         )
+#         prompts_fbk.append(prompt_fbk)
+#
+#
+#     return prompts, prompts_fbk
 
 def get_mini_batch_dict(retriever_inputs, mb_inds):
     mb_retriever_inputs = {}

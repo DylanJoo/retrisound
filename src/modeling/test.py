@@ -78,10 +78,11 @@ def test_reward_wrapper():
     reward_value_model = GenerativeRewardWrapper(
         generator=model,
         tokenizer=tokenizer,
-        utility=Metric('rouge')
+        utility=Metric('rouge'),
+        generation_config=model.generation_config
     )
 
-    q, r, r_texts, test = reward_value_model._inference(
+    q, r, r_texts = reward_value_model._inference(
         ['hello, I am', 'the reason i am here is']
     )
 
@@ -94,5 +95,5 @@ def test_reward_wrapper():
     rw = reward_value_model.get_rewards(["app", "Thank you"], r_texts)
     print(rw)
 
-test_bi_encder()
-# test_reward_wrapper()
+# test_bi_encder()
+test_reward_wrapper()

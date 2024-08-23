@@ -31,7 +31,8 @@ logger = logging.get_logger("transformers")
 
 def main():
 
-    from options import ModelOptions, DataOptions, RLTrainOptions
+    from options import ModelOptions, DataOptions, ReinforceOptions
+    # from options import ModelOptions, DataOptions, RLTrainOptions
     parser = HfArgumentParser((ModelOptions, DataOptions, RLTrainOptions))
     model_opt, data_opt, train_opt = parser.parse_args_into_dataclasses()
     set_seed(train_opt.seed)
@@ -71,7 +72,6 @@ def main():
     llm = AutoModelForCausalLM.from_pretrained(
         model_opt.generator_name_or_path,
         config=config,
-        low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
         attn_implementation=model_opt.attn_implementation,
         torch_dtype=torch.bfloat16,
     ).eval()
@@ -88,11 +88,14 @@ def main():
     ).eval()
 
     # [Data]
-    train_opt.dataset_prefix = data_opt.train_file
+    train_opt.dataset_prefix = data_opt.train_file.lower()
     if 'qampari' in train_opt.dataset_prefix:
         from data.qampari import ContextQADataset, ContextQACollator
-    if 'asqa' in train_opt.dataset_prefix:
+    elif 'asqa' in train_opt.dataset_prefix:
         from data.asqa import ContextQADataset, ContextQACollator
+    else:
+        print(train_opt.dataset_prefix)
+        raise ValueError('no available dataset')
 
     train_dataset = ContextQADataset(
         data_file=data_opt.train_file, 
@@ -102,6 +105,7 @@ def main():
         depth=data_opt.depth,
         corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
+        quick_test=train_opt.quick_test
     )
 
     ## data ollator
@@ -111,13 +115,13 @@ def main():
     )
 
     # [trainer]
+    train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
     from reinforce_trainer import Trainer
     trainer = Trainer(
         reward_model=reward_model,
         model=ada_reranker,
         tokenizer=tokenizer_g,
         args=train_opt,
-        tokenizer=tokenizer,
         train_dataset=train_dataset,
         data_collator=data_collator,
     )
