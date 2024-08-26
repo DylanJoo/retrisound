@@ -112,7 +112,7 @@ class ContextQADataset(Dataset):
                     try:
                         self.corpus[docid].update(docdict)
                     except:
-                        continue
+                        self.corpus[docid] = docdict
             del corpora
 
     def __len__(self):

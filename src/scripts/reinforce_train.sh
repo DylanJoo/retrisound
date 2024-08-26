@@ -1,7 +1,7 @@
 #!/bin/sh
 #SBATCH --job-name=adarag
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_rtx_a6000:1
+#SBATCH --gres=gpu:nvidia_l40:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -26,12 +26,15 @@ GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=facebook/contriever-msmarco
-BASE_RET=bert-base-uncased
+# BASE_RET=bert-base-uncased
 
 MODEL_SIZE=1B
-BASE_LLM=allenai/OLMo-1B-hf
+# BASE_LLM=allenai/OLMo-1B-hf
+BASE_LLM=TinyLlama/TinyLlama_v1.1
 
-echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GRADIENT_ACC_STEPS gradient accumulation steps"
+echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
+echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
+echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --main_process_port 29501 \
@@ -49,7 +52,7 @@ accelerate launch \
 	--retrieval_file /home/dju/datasets/asqa/train_data_bm25-top100.run \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 1e-4 \
+    --learning_rate 5e-5 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
@@ -57,6 +60,10 @@ accelerate launch \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 2 \
+    --n_contexts 10 \
+    --n_max_segments 2 \
+    --n_max_candidates 10 \
+    --num_steps 1 \
     --bf16 true \
     --logging_steps 1
 

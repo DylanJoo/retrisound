@@ -2,6 +2,16 @@ import collections
 import json
 from tqdm import tqdm
 from datasets import load_dataset
+from pyserini.search.lucene import LuceneSearcher
+from pyserini.search.faiss import FaissSearcher, AutoQueryEncoder
+
+def load_searcher(path, dense=False):
+    if dense:
+        searcher = LuceneSearcher(path)
+        searcher.set_bm25(k1=0.9, b=0.4)
+    else:
+        searcher FaissSearcher(path, None)
+    return searcher
 
 def load_runs(path, output_score=False): # support .trec file only
     run_dict = collections.defaultdict(list)

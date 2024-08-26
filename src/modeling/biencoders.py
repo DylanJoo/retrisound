@@ -14,6 +14,7 @@ from .dist_utils import gather
 
 @dataclass
 class InBatchOutput(BaseModelOutput):
+    qembs: torch.FloatTensor = None
     loss: torch.FloatTensor = None
     logits: Optional[torch.FloatTensor] = None
     all_scores: Optional[torch.FloatTensor] = None
@@ -116,6 +117,7 @@ class AdaptiveReranker(nn.Module):
             loss_r = CELoss(rel_scores, labels)
 
         return InBatchOutput(
+            qembs=qembs,
             loss=loss_r,
             logits=logits, # B N_cand H
             all_scores=all_scores, # B N_cand

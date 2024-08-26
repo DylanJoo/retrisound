@@ -1,29 +1,13 @@
 # prompts for answering
-instruction_prompt = "Answer the given question using the provided search results (some of which might be irrelevant)."
-doc_prompt_template = "[{ID}]: (Title: {T}) {P}\n"
-inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nOld search results:\n{D}\n{PREFIX}"
+inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch results:\n{D}\n{PREFIX}"
+instruction_prompt = "Answer the question using the provided search results (some of which might be irrelevant)."
+# doc_prompt_template = "[{ID}] (Title: {T}) {P}\n"
+doc_prompt_template = "[{ID}] {P}\n"
+# doc_prompt_template = "- {P}\n"
 
 ## ===== WITH ANSWER =====
-fbk_inst_prompt_template = "{INST}\n\nQuestion: {Q} Example answer: {A}\n\nOld search results:\n{D}\n{PREFIX}"
-fbk_instruction_prompt = "Read and examine the given question and the example asnwer. The example answer is generated according to the given old search results. Write a new query for new search results. The new search results should help answer the question more comprehensively comparing to the older search results."
-fbk_prefix="New query:"
-
-## ===== WITHOUT ANSWER =====
-### (2) Instruction first + Query expansion
-# fbk_instruction_prompt += " Finally, write a new keyword combintation for searching additional new documents. These new documents are expected to complete the missing knowledge about the question." 
-# fbk_prefix="New keyword combintation:"
-
-## [Two-part instructions] One for identifying gap, one for reasoning the task. romtps for asking feedback
-## (3) Instruction later + Query rewriting
-# fbk_instruction_prompt = "Read and understand the given question. Then, based on the question, identify the useful information in the provided search results (some of which might be irrelevant)."
-# fbk_prefix="In addition to the provided search results, rewrite a next question for next searching. These additional new documents are expected to complete the missing knowledge about the question.\n\nRewritten next question:"
-
-### (4) Instruction later + Query expansion
-# fbk_instruction_prompt = "Read and understand the given question. Then, based on the question, identify the useful information in the provided search results (some of which might be irrelevant)."
-# fbk_prefix="Based the identified useful information, write a new new keyword combination for searching additional new documents. These new documents are expected to complete the missing knowledge about the question.\n\nNew keyword combination: "
-
-## with answer 
-# TBD
+fbk_inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nAnswer: {A}\n\nInitial search results:\n{D}\n{PREFIX}"
+fbk_instruction_prompt = "Read the given question and examine the example answer. The answer was generated using the initial search results listed below. Please provide additional keywords that can obtain more helpful search results in terms of correctness and comprehensiveness."
 
 def apply_docs_prompt(doc_items, field='text'):
     p = ""
@@ -42,9 +26,9 @@ def apply_rsp_inst_prompt(Q, D, instruction="", prefix="Answer: "):
     p = p.replace("{PREFIX}", prefix).strip()
     return p
 
-def apply_fbk_inst_prompt(Q, D, A, instruction="", prefix="New query: "):
+def apply_fbk_inst_prompt(Q, D, A="no answer.", instruction="", prefix="Keywords: "):
     p = fbk_inst_prompt_template
     p = p.replace("{INST}", instruction).strip()
-    p = p.replace("{Q}", Q).replace("{D}", D).replace("{A}", "")
+    p = p.replace("{Q}", Q).replace("{D}", D).replace("{A}", A)
     p = p.replace("{PREFIX}", prefix).strip()
     return p

@@ -57,9 +57,9 @@ def main():
         do_contrastive=True
     ).train()
 
-    for n, p in ada_reranker.named_parameters():
-        if p.requires_grad:
-            logger.info(f"Optimized: {n}")
+    # for n, p in ada_reranker.named_parameters():
+    #     if p.requires_grad:
+    #         logger.info(f"Optimized: {n}")
 
     # [Generator]
     ## Config & tokenizer

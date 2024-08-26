@@ -4,8 +4,9 @@ from typing import Optional, Union, Tuple, Literal
 
 @dataclass
 class ModelOptions:
-    retriever_name_or_path: Optional[str] = field(default="facebook/contriever")
-    generator_name_or_path: Optional[str] = field(default="TinyLlama/TinyLlama-1.1B-Chat-v0.6")
+    retriever_name_or_path: Optional[str] = field(default="")
+    generator_name_or_path: Optional[str] = field(default="")
+    faiss_index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
     n_negative_samples: Optional[int] = field(default=0)
     fixed_d_encoder: Optional[bool] = field(default=False)
@@ -17,25 +18,23 @@ class ModelOptions:
 
 @dataclass
 class DataOptions:
-    config_file: Optional[str] = field(default=None)
     train_file: Optional[str] = field(default=None)
     corpus_file: Optional[str] = field(default=None)
     retrieval_file: Optional[str] = field(default=None)
     depth: Optional[int] = field(default=30)
 
 from trl.trainer.reward_config import RewardConfig
-from trl.trainer.ppov2_config import PPOv2Config
 @dataclass
 class ReinforceOptions(RewardConfig):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     n_contexts: Optional[int] = field(default=5)
     n_max_segments: Optional[int] = field(default=2)
     n_max_candidates: Optional[int] = field(default=10)
+    num_steps: Optional[int] = field(default=1)
     run_name: Optional[str] = field(default='testing')
     wandb_project: Optional[str] = field(default='adarag')
     max_steps: int = field(default=-1) # different from HF's  
     num_processes: Optional[int] = field(default=1)
-    num_steps: Optional[int] = field(default=1)
     remove_unused_columns: Optional[bool] = field(default=False)
     learning_rate: float = field(default=5e-5)
     num_mini_batches: int = 2
@@ -44,7 +43,9 @@ class ReinforceOptions(RewardConfig):
     reward_function: Optional[str] = field(default='metric')
     ampere_gpu: Optional[bool] = field(default=False)
     generation_batch: Optional[int] = field(default=None)
+    report_to: Optional[str] = field(default="wandb")
 
+from trl.trainer.ppov2_config import PPOv2Config
 @dataclass
 class RLTrainOptions(PPOv2Config):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
@@ -75,6 +76,7 @@ class RLTrainOptions(PPOv2Config):
     ampere_gpu: Optional[bool] = field(default=False)
     generation_batch: Optional[int] = field(default=None)
     world_size: Optional[int] = field(default=1)
+    report_to: Optional[str] = field(default="wandb")
 
 # from transformers import TrainingArguments
 # @dataclass

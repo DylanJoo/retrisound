@@ -7,6 +7,7 @@ class RMTBaseModel(torch.nn.Module):
     def __init__(self, base_model, **rmt_kwargs):
         super().__init__()
         self.model = base_model
+        self.tokenizer = rmt_kwargs.get('tokenizer', None)
         self.set_params(**rmt_kwargs)
 
     # def save_pretrained(self, **kwargs):
