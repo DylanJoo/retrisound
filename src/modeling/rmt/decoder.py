@@ -1,7 +1,6 @@
 import inspect
 import torch
 import torch.nn.functional as F
-from .base import RMTBaseModel
 from typing import Optional, Tuple
 from transformers.modeling_outputs import BaseModelOutput
 from dataclasses import dataclass
@@ -17,13 +16,30 @@ class RMTDecoder(torch.nn.Module):
         self.memory_cell = memory_cell
         self.rmt_config = rmt_kwargs
 
-    def forward(self, input_ids, labels=None, labels_mask=None, inputs_embeds=None, attention_mask=None, output_attentions=None, output_hidden_states=None):
+    def forward(
+        self, 
+        input_ids, 
+        labels=None, 
+        labels_mask=None, 
+        inputs_embeds=None, 
+        attention_mask=None, 
+        output_attentions=None, 
+        output_hidden_states=None
+    ):
         memory_state = None
-        segmented = self.segment(input_ids=input_ids, inputs_embeds=inputs_embeds, attention_mask=attention_mask)
+        segmented = self.segment(
+            input_ids=input_ids, 
+            inputs_embeds=inputs_embeds, 
+            attention_mask=attention_mask
+        )
 
         cell_outputs = []
         for seg_num, segment in enumerate(segmented):
-            cell_out, memory_state = self.memory_cell(**segment, memory_state=memory_state, output_hidden_states=True)
+            cell_out, memory_state = self.memory_cell(
+                **segment, 
+                memory_state=memory_state, 
+                output_hidden_states=True
+            )
             cell_outputs.append(cell_out)
             self.manage_gradients(memory_state, seg_num)
 
@@ -41,7 +57,11 @@ class RMTDecoder(torch.nn.Module):
         segmented = self.segment(input_ids=input_ids, attention_mask=attention_mask)
 
         for seg_num, segment in enumerate(segmented[:-1]):
-            cell_out, memory_state = self.memory_cell(**segment, memory_state=memory_state, output_hidden_states=True)
+            cell_out, memory_state = self.memory_cell(
+                **segment, 
+                memory_state=memory_state, 
+                output_hidden_states=True
+            )
 
         final_segment = segmented[-1]
         out = self.memory_cell.generate(**final_segment, memory_state=memory_state, **generate_kwargs)

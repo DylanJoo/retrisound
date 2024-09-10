@@ -32,6 +32,9 @@ MODEL_SIZE=1B
 # BASE_LLM=allenai/OLMo-1B-hf
 BASE_LLM=TinyLlama/TinyLlama_v1.1
 
+MODEL_SIZE=8B
+BASE_LLM=meta-llama/Meta-Llama-3.1-8B
+
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
 echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
