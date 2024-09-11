@@ -24,16 +24,14 @@ from utils import (
     multiple_sample_and_log_probability, 
     augmentation_response,
     augmentation_feedback,
-    get_mini_batch_dict,
-    load_searcher
+    get_mini_batch_dict
 )
 
 class Trainer(RewardTrainer):
 
-    def __init__(self, reward_model, index_dir=None, **kwargs):
+    def __init__(self, reward_model, **kwargs):
         super().__init__(**kwargs)
         self.reward_model = reward_model
-        self.searcher = load_searcher(index_dir, dense=True)
         self._move_model_to_device(self.reward_model, self.args.device)
 
     def compute_loss(
@@ -56,35 +54,28 @@ class Trainer(RewardTrainer):
                 retriever_inputs = inputs["inputs_for_retriever"]
             else: 
                 baseline = reward # last reward as baseline
-                del retriever_inputs, outputs
-
+                del retriever_inputs, outputs, logit, ranking, logprob
                 gc.collect()
                 retriever_inputs = self.data_collator.get_inputs_for_retriever(
                     [self.train_dataset[idx] for idx in data_indices],
                     device=model.device
                 )
 
+            ### retrieval (ranking) and prepare contexts
             outputs = model(**retriever_inputs, include_n_feedbacks=t+1)
-            queries = outputs.qembs[:, -1, :] # the last reformulated qemb
+            logit = outputs.logits
+            ranking, logprob = multiple_sample_and_log_probability(logit, 1, batch=True)
+            ranking = ranking.squeeze(1) 
 
-            ### re-ranking without prepare contexts (deprecated)
-            ### retrieval and prepare contexts
-            hits = self.searcher.batch_search(
-                queries.float().detach().cpu().numpy(), q_ids=list(range(queries.size()[0])), k=len(candidates[0])
-            )
-            candidates = [] 
-            for i, key in enumerate(hits):
-                candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
-                candidates.append( candidate )
+            gen_batch = (1 or self.args.generation_batch)
 
             ### generation
-            gen_batch = (1 or self.args.generation_batch)
             ### (1) response
             prompt = augmentation_response(
                 questions=questions, 
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
-                rankings=None if self.searcher is not None,
+                rankings=ranking, 
                 dataset_prefix=self.args.dataset_prefix
             )
             response = []
@@ -99,7 +90,7 @@ class Trainer(RewardTrainer):
                 answers=response,
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
-                rankings=None if self.searcher is not None,
+                rankings=ranking, 
                 dataset_prefix=self.args.dataset_prefix
             )
             feedback = []
@@ -115,7 +106,6 @@ class Trainer(RewardTrainer):
             reward = reward.to(model.device)
 
         ## baseline can be the improved one-shot retrieval
-        logprob = -1
         reinforce_loss = ((reward - baseline) * (-logprob)).mean()
         contrastive_loss = outputs.loss
 

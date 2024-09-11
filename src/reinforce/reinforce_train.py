@@ -38,13 +38,27 @@ def main():
 
     # [Retriever]
     ## Config & tokenizer
-    from modeling import Contriever, FeedbackQueryModifier
+    from modeling import RMTEncoder, AdaptiveReranker, Contriever
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-    ada_retriever = FeedbackQueryModifier(
-        model_opt,
-        qr_encoder=Contriever.from_pretrained(model_opt.retriever_name_or_path),
-        qf_encoder=Contriever.from_pretrained('bert-base-uncased').train(),
+    ada_encoder = RMTEncoder(
+        base_model=Contriever.from_pretrained(model_opt.retriever_name_or_path),
+        tokenizer=tokenizer_r,
+        num_mem_tokens=model_opt.num_mem_tokens,
+        n_max_segments=train_opt.n_max_segments,
+        input_size=512,
+        sum_loss=False,
     )
+    ada_reranker = AdaptiveReranker(
+        model_opt,
+        q_encoder=ada_encoder,
+        d_encoder=Contriever.from_pretrained("facebook/contriever-msmarco"),
+        n_max_candidates=train_opt.n_max_candidates,
+        do_contrastive=True
+    ).train()
+
+    # for n, p in ada_reranker.named_parameters():
+    #     if p.requires_grad:
+    #         logger.info(f"Optimized: {n}")
 
     # [Generator]
     ## Config & tokenizer
@@ -105,7 +119,7 @@ def main():
 
     # [trainer]
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from qlearning_trainer import Trainer
+    from reinforce_trainer import Trainer
     trainer = Trainer(
         reward_model=reward_model,
         model=ada_reranker,

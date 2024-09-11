@@ -47,7 +47,7 @@ class ReinforceOptions(RewardConfig):
 
 from trl.trainer.ppov2_config import PPOv2Config
 @dataclass
-class RLTrainOptions(PPOv2Config):
+class OffPolicyTrainOptions(PPOv2Config):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     n_contexts: Optional[int] = field(default=5)
     n_max_segments: Optional[int] = field(default=2)
@@ -77,21 +77,3 @@ class RLTrainOptions(PPOv2Config):
     generation_batch: Optional[int] = field(default=None)
     world_size: Optional[int] = field(default=1)
     report_to: Optional[str] = field(default="wandb")
-
-# from transformers import TrainingArguments
-# @dataclass
-# class TrainOptions(TrainingArguments):
-#     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
-#     low_cpu_mem_usage: Optional[bool] = field(default=False) 
-#     n_contexts: Optional[int] = field(default=5)
-#     n_max_segments: Optional[int] = field(default=5)
-#     n_max_candidates: Optional[int] = field(default=10)
-#     quick_test: Optional[int] = field(default=None)
-#     wandb_project: Optional[str] = field(default='testing')
-#     with_tracking: Optional[bool] = field(default=False)
-#     max_steps: int = field(default=-1) # different from HF's  
-#     num_processes: Optional[int] = field(default=1)
-#     remove_unused_columns: Optional[bool] = field(default=False)
-#     policy_on: str = field(default='metrics')
-#     learning_rate: float = field(default=5e-5)
-
