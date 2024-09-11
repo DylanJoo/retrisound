@@ -203,12 +203,14 @@ def multiple_sample_and_log_probability(
         else:
             return rankings
 
-def load_searcher(path, dense=False):
+def load_searcher(path, dense=False, sparse=False):
     if dense:
         searcher = FaissSearcher(path, 'facebook/contriever-msmarco')
-    else:
+    elif sparse:
         searcher = LuceneSearcher(path)
         searcher.set_bm25(k1=0.9, b=0.4)
+    else:
+        searcher = None
     return searcher
 
 def get_expected_inputs(

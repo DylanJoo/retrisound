@@ -57,17 +57,17 @@ class Trainer(RewardTrainer):
             else: 
                 baseline = reward # last reward as baseline
                 del retriever_inputs, outputs
+
                 gc.collect()
                 retriever_inputs = self.data_collator.get_inputs_for_retriever(
                     [self.train_dataset[idx] for idx in data_indices],
                     device=model.device
                 )
 
-            ### retrieval and prepare contexts
             outputs = model(**retriever_inputs, include_n_feedbacks=t+1)
-            queries = outputs.qembs[:, -1, :] # the last embeddings
+            queries = outputs.qembs[:, -1, :] # the last reformulated qemb
 
-            ### search top-k candidates
+            ### retrieval and prepare contexts
             hits = self.searcher.batch_search(
                 queries.float().detach().cpu().numpy(), q_ids=list(range(queries.size()[0])), k=len(candidates[0])
             )
@@ -83,7 +83,7 @@ class Trainer(RewardTrainer):
                 questions=questions, 
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
-                rankings=None,
+                rankings=None if self.searcher is not None,
                 dataset_prefix=self.args.dataset_prefix
             )
             response = []
@@ -98,7 +98,7 @@ class Trainer(RewardTrainer):
                 answers=response,
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
-                rankings=None,
+                rankings=None if self.searcher is not None,
                 dataset_prefix=self.args.dataset_prefix
             )
             feedback = []
