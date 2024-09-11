@@ -7,25 +7,11 @@ tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
 model = Contriever.from_pretrained('bert-base-uncased')
 
 def test_q_encoder():
-    from rmt import RMTEncoder
-    q_encoder = RMTEncoder(
-        base_model=model, 
-        num_mem_tokens=4,
-        tokenizer=tokenizer,
-        input_size=512,
-        sum_loss=False
-    )
+    from base_encoder import Contriever
+    q_encoder = Contriever.from_pretrained('facebook/contriever-msmarco')
 
     input = tokenizer(['hello world', 'apple'], return_tensors='pt', padding=True)
-    input_ids = [input['input_ids'], input['input_ids'], input['input_ids']]
-    attention_mask = [input['attention_mask'], input['attention_mask'], input['attention_mask']]
-    out = q_encoder(input_ids, attention_mask)
-
-    print(out.keys())
-    print(out['last_hidden_state'].shape)
-    print(out['last_hidden_state'][0].shape)
-    print(out['last_hidden_state'][0][:4, :10])
-    print(out['last_hidden_state'][1][:4, :10])
+    out = q_encoder(**input)
     return q_encoder
 
 def test_bi_encder():
@@ -39,14 +25,16 @@ def test_bi_encder():
         num_budget: Optional[int] = field(default=5)
         tau: Optional[float] = field(default=1.0)
 
-    from biencoders import AdaptiveReranker
+    # from biencoders import AdaptiveReranker
+    from modifier import FeedbackQueryModifier
     model_opt = ModelOptions()
-    q_encoder = test_q_encoder()
-    d_encoder = deepcopy(model)
-    ada_reranker = AdaptiveReranker(
+    qr_encoder = test_q_encoder()
+    qf_encoder = deepcopy(qf_encoder)
+
+    biencoder = FeedbackQueryModifier(
         model_opt,
-        q_encoder=q_encoder,
-        d_encoder=d_encoder,
+        qr_encoder=qr_encoder,
+        qf_encoder=qf_encoder,
     )
 
     input = tokenizer(['apple'], return_tensors='pt', padding=True)
@@ -55,20 +43,18 @@ def test_bi_encder():
     input_ids = [input['input_ids'], input2['input_ids'], input3['input_ids']]
     attention_mask = [input['attention_mask'], input2['attention_mask'], input3['attention_mask']]
 
-    input = tokenizer(['apple'], return_tensors='pt', padding=True)
-    input2 = tokenizer(['apple and banana are good'], return_tensors='pt', padding=True)
-    input3 = tokenizer(['apple and banana and watermelon are good'], return_tensors='pt', padding=True)
-    d_input_ids = [input['input_ids'], input2['input_ids'], input3['input_ids']]
-    d_attention_mask = [input['attention_mask'], input2['attention_mask'], input3['attention_mask']]
-
-    out = ada_reranker.forward(
-        input_ids,
-        attention_mask,
-        d_input_ids,
-        d_attention_mask,
+    d_input = tokenizer(
+        ['apple', 'apple and banana are good', 'apple and banana and watermelon are good'], 
+        return_tensors='pt', 
+        padding=True
     )
-    print(ada_reranker.q_encoder.model)
-    # ada_reranker.q_encoder.model.save_pretrained('testing')
+
+    out = biencoder.forward(
+        q_tokens=input_ids,
+        q_masks=attention_mask,
+        d_tokens=d_input['input_ids'],
+        d_masks=d_input['attention_mask'],
+    )
 
 def test_reward_wrapper():
     tokenizer = AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v0.6')
@@ -86,14 +72,8 @@ def test_reward_wrapper():
         ['hello, I am', 'the reason i am here is']
     )
 
-    # print(len(test[0]), len(p[0]))
-    # for i in [0, 1]:
-    #     for a, b in zip(test[i], p[i]):
-    #         if a != '</s>':
-    #             print(a, b)
-    # print(r_texts)
     rw = reward_value_model.get_rewards(["app", "Thank you"], r_texts)
     print(rw)
 
-# test_bi_encder()
-test_reward_wrapper()
+test_bi_encder()
+# test_reward_wrapper()
