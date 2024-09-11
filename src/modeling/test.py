@@ -29,7 +29,7 @@ def test_bi_encder():
     from modifier import FeedbackQueryModifier
     model_opt = ModelOptions()
     qr_encoder = test_q_encoder()
-    qf_encoder = deepcopy(qf_encoder)
+    qf_encoder = deepcopy(qr_encoder)
 
     biencoder = FeedbackQueryModifier(
         model_opt,
@@ -52,9 +52,10 @@ def test_bi_encder():
     out = biencoder.forward(
         q_tokens=input_ids,
         q_masks=attention_mask,
-        d_tokens=d_input['input_ids'],
-        d_masks=d_input['attention_mask'],
+        d_tokens=[d_input['input_ids']],
+        d_masks=[d_input['attention_mask']]
     )
+    print(out)
 
 def test_reward_wrapper():
     tokenizer = AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v0.6')

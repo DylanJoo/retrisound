@@ -9,7 +9,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List, Mapping
 from transformers.modeling_outputs import BaseModelOutput
-from .dist_utils import gather
+# from .dist_utils import gather
 
 @dataclass
 class BiencoderOutput(BaseModelOutput):
@@ -76,7 +76,7 @@ class FeedbackQueryModifier(nn.Module):
         qembs = []
         for i in range(include_n_feedbacks):
             if i == 0:
-                qemb = self.qr_encoder(q_tokens[0], q_masks[0])
+                qemb = self.qr_encoder(q_tokens[0], q_masks[0]).emb
             else:
                 qfemb = self.qf_encoder(q_tokens[i], q_masks[i]).emb  # B H
                 qemb = self.modifier(qembs[0], qfemb)
@@ -92,11 +92,11 @@ class FeedbackQueryModifier(nn.Module):
             #     gather_fn = gather
             #     demb_ibn = gather_fn(demb_ibn)
 
-            labels = torch.arange(0, batch_size, dtype=torch.long, device=qemb_ibn.device)
+            labels = torch.arange(0, batch_size, dtype=torch.long, device=qembs.device)
             scores = torch.einsum("id, jd->ij", qembs[:, 0, :]/self.tau, dembs)
 
             CELoss = nn.CrossEntropyLoss()
-            loss_r = CELoss(rel_scores, labels)
+            loss_r = CELoss(scores, labels)
 
         # conetxt list-wise ranking for b-th batch
         # logits = scores = torch.max(all_scores, 1).values # B N_cand
