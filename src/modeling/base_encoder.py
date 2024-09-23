@@ -8,12 +8,14 @@ from dataclasses import dataclass
 @dataclass
 class EncoderOutput(BaseModelOutput):
     emb: torch.FloatTensor = None
-    last_hidden_state: torch.FloatTensor = None
+    last_hidden_states: torch.FloatTensor = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 class Contriever(BertModel):
     def __init__(self, config, add_pooling_layer=False, **kwargs):
         super().__init__(config, add_pooling_layer=add_pooling_layer)
+        self.pooling = kwargs.pop('pooling', 'mean')
+        print(self.pooling)
 
     def forward(
         self,
@@ -43,7 +45,11 @@ class Contriever(BertModel):
         )
 
         last_hidden_states = model_output["last_hidden_state"]
-        last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
 
-        emb = last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
-        return EncoderOutput(emb=emb, last_hidden_state=last_hidden)
+        if attention_mask is not None:
+            last_hidden_states = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
+        if self.pooling == 'mean':
+            emb = last_hidden_states.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
+        if self.pooling == 'cls':
+            emb = last_hidden_states[:, 0]
+        return EncoderOutput(emb=emb, last_hidden_states=last_hidden_states)

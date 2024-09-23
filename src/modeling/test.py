@@ -2,9 +2,20 @@ import torch
 from copy import deepcopy
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from base_encoder import Contriever
+from dataclasses import dataclass, field
+from typing import Optional, Union, Tuple, Literal
 
 tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
 model = Contriever.from_pretrained('bert-base-uncased')
+model_cls = Contriever.from_pretrained('bert-base-uncased', pooling='cls')
+
+@dataclass
+class ModelOptions:
+    retriever_name_or_path: Optional[str] = field(default="facebook/contriever")
+    add_pooling_layer: Optional[bool] = field(default=False)
+    num_mem_tokens: Optional[int] = field(default=1)
+    num_budget: Optional[int] = field(default=5)
+    tau: Optional[float] = field(default=1.0)
 
 def test_q_encoder():
     from base_encoder import Contriever
@@ -14,18 +25,36 @@ def test_q_encoder():
     out = q_encoder(**input)
     return q_encoder
 
-def test_bi_encder():
-    from dataclasses import dataclass, field
-    from typing import Optional, Union, Tuple, Literal
-    @dataclass
-    class ModelOptions:
-        retriever_name_or_path: Optional[str] = field(default="facebook/contriever")
-        add_pooling_layer: Optional[bool] = field(default=False)
-        num_mem_tokens: Optional[int] = field(default=1)
-        num_budget: Optional[int] = field(default=5)
-        tau: Optional[float] = field(default=1.0)
+def test_crossencoder():
+    from crossencoder import ValueCrossEncoder
+    model_opt = ModelOptions()
+    crossencoder = ValueCrossEncoder(
+        model_opt,
+        cross_encoder=model_cls,
+        d_encoder=model,
+        n_max_candidates=10
+    )
 
-    # from biencoders import AdaptiveReranker
+    input1 = tokenizer(['delicious']*2, return_tensors='pt')
+    input2 = tokenizer(['apple']*2, return_tensors='pt')
+    embed1 = model(**input1).emb[:, None, :]
+    embed2 = model(**input2).emb[:, None, :]
+
+    d_input = []
+    for c in ['apple', 'apple and banana are good', 'apple and banana and watermelon are good']:
+        d_input.append(
+            tokenizer([c] * 2, return_tensors='pt', padding=True)
+        )
+
+    out = crossencoder.forward(
+        qr_embed=embed1, 
+        qf_embed=embed2,
+        c_tokens=[d['input_ids'] for d in d_input],
+        c_masks=[d['attention_mask'] for d in d_input]
+    )
+    print(out.qemb.shape)
+
+def test_biencder():
     from modifier import FeedbackQueryModifier
     model_opt = ModelOptions()
     qr_encoder = test_q_encoder()
@@ -76,5 +105,6 @@ def test_reward_wrapper():
     rw = reward_value_model.get_rewards(["app", "Thank you"], r_texts)
     print(rw)
 
-test_bi_encder()
+# test_biencder()
+test_crossencoder()
 # test_reward_wrapper()

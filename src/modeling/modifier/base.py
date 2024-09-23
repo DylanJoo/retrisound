@@ -51,7 +51,7 @@ class FeedbackQueryModifier(nn.Module):
         super().__init__()
         self.opt = opt
         self.qr_encoder = qr_encoder
-        self.qf_encoder = qf_encoder
+        self.qf_encoder = (qf_encoder or qr_encoder)
         self.d_encoder = (d_encoder or qr_encoder)
 
         self.is_ddp = dist.is_initialized()
@@ -64,10 +64,19 @@ class FeedbackQueryModifier(nn.Module):
         for n, p in self.named_parameters():
             if 'd_encoder' in n:
                 p.requires_grad = False
-            if 'qr_encoder' in n:
+            elif 'qr_encoder' in n:
                 p.requires_grad = False
+            else:
+                p.requires_grad = True
 
-    def forward(self, q_tokens, q_masks, d_tokens=None, d_masks=None, **kwargs):
+    def forward(
+        self, 
+        q_tokens, 
+        q_masks, 
+        d_tokens=None, 
+        d_masks=None, 
+        **kwargs
+    ):
         n_segments = len(q_tokens)
         include_n_feedbacks = kwargs.pop('include_n_feedbacks', n_segments)
         batch_size = q_tokens[0].size(0)

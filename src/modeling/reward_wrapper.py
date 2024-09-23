@@ -98,8 +98,7 @@ class GenerativeRewardWrapper(nn.Module):
             do_sample=True, 
             temperature=0.7,
             top_p=0.95,
-            min_new_tokens=8,
-            max_new_tokens=128,
+            max_new_tokens=64,
         )
         responses = self.tokenizer.batch_decode(
             response_outputs[:, query_tensors.shape[1]:],
