@@ -14,6 +14,7 @@ from transformers.modeling_outputs import BaseModelOutput
 @dataclass
 class BiencoderOutput(BaseModelOutput):
     qembs: torch.FloatTensor = None
+    dembs: torch.FloatTensor = None
     loss: torch.FloatTensor = None
     scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
@@ -47,15 +48,17 @@ class FeedbackQueryModifier(nn.Module):
         qr_encoder, 
         qf_encoder=None,
         d_encoder=None,
+        n_candidates=None
     ):
         super().__init__()
         self.opt = opt
+        self.is_ddp = dist.is_initialized()
+        self.tau = opt.tau
+        self.n_candidates = n_candidates
+
         self.qr_encoder = qr_encoder
         self.qf_encoder = (qf_encoder or qr_encoder)
         self.d_encoder = (d_encoder or qr_encoder)
-
-        self.is_ddp = dist.is_initialized()
-        self.tau = opt.tau
         self.modifier = ModifierHead(
             qr_encoder.config.hidden_size + qf_encoder.config.hidden_size,
             qr_encoder.config.hidden_size
@@ -92,27 +95,26 @@ class FeedbackQueryModifier(nn.Module):
             qembs.append(qemb)
         qembs = torch.stack(qembs, dim=1) # B N_seg H
 
-        # encode document if applicable
+        # loss calculation
         scores, loss_r = None, 0.0
+        CELoss = nn.CrossEntropyLoss()
+
+        # encode document if using contrastive signals
+        dembs = []
         if (d_tokens is not None):
-            dembs = self.d_encoder(d_tokens[0], d_masks[0]).emb  # B H
-
-            # if self.is_ddp:
-            #     gather_fn = gather
-            #     demb_ibn = gather_fn(demb_ibn)
-
+            n_candidates = (self.n_candidates or len(d_tokens))
+            for i in range(n_candidates):
+                demb = self.d_encoder(d_tokens[i], d_masks[i]).emb  # B H
+                dembs.append(demb)
+            dembs = torch.stack(dembs, dim=1) # B N_cand H
+            scores = torch.einsum("ind, jd->nij", qembs/self.tau, dembs[:, 0, :]) # N B B
             labels = torch.arange(0, batch_size, dtype=torch.long, device=qembs.device)
-            scores = torch.einsum("id, jd->ij", qembs[:, 0, :]/self.tau, dembs)
-
-            CELoss = nn.CrossEntropyLoss()
-            loss_r = CELoss(scores, labels)
-
-        # conetxt list-wise ranking for b-th batch
-        # logits = scores = torch.max(all_scores, 1).values # B N_cand
-        # ranking = (-scores).argsort(-1) # B N_cand
+            loss_r = CELoss(scores[0, :, :], labels) # first query and document
+            # loss_r = CELoss(scores[-1, :, :], labels) # last query and document
 
         return BiencoderOutput(
             qembs=qembs,
+            dembs=dembs,
             loss=loss_r,
             scores=scores, 
             logs={'InfoNCE': loss_r}

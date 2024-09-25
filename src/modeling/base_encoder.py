@@ -15,7 +15,6 @@ class Contriever(BertModel):
     def __init__(self, config, add_pooling_layer=False, **kwargs):
         super().__init__(config, add_pooling_layer=add_pooling_layer)
         self.pooling = kwargs.pop('pooling', 'mean')
-        print(self.pooling)
 
     def forward(
         self,

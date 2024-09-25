@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Union, Tuple, Literal
 
 tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-model = Contriever.from_pretrained('bert-base-uncased')
-model_cls = Contriever.from_pretrained('bert-base-uncased', pooling='cls')
+model = Contriever.from_pretrained('bert-base-uncased', pooling='mean')
+model_cls = Contriever.from_pretrained('OpenMatch/cocodr-base-msmarco', pooling='cls')
 
 @dataclass
 class ModelOptions:
@@ -19,72 +19,70 @@ class ModelOptions:
 
 def test_q_encoder():
     from base_encoder import Contriever
-    q_encoder = Contriever.from_pretrained('facebook/contriever-msmarco')
-
+    q_encoder = Contriever.from_pretrained('OpenMatch/cocodr-base-msmarco', pooling='cls')
     input = tokenizer(['hello world', 'apple'], return_tensors='pt', padding=True)
     out = q_encoder(**input)
     return q_encoder
 
 def test_crossencoder():
     from crossencoder import ValueCrossEncoder
+    from transformers import BertForSequenceClassification
+
     model_opt = ModelOptions()
+    cross_encoder = BertForSequenceClassification.from_pretrained("bert-base-uncased")
+
     crossencoder = ValueCrossEncoder(
         model_opt,
-        cross_encoder=model_cls,
+        cross_encoder=cross_encoder,
         d_encoder=model,
         n_max_candidates=10
     )
 
-    input1 = tokenizer(['delicious']*2, return_tensors='pt')
-    input2 = tokenizer(['apple']*2, return_tensors='pt')
-    embed1 = model(**input1).emb[:, None, :]
-    embed2 = model(**input2).emb[:, None, :]
-
-    d_input = []
-    for c in ['apple', 'apple and banana are good', 'apple and banana and watermelon are good']:
-        d_input.append(
-            tokenizer([c] * 2, return_tensors='pt', padding=True)
-        )
-
+    outputs = test_biencder()
     out = crossencoder.forward(
-        qr_embed=embed1, 
-        qf_embed=embed2,
-        c_tokens=[d['input_ids'] for d in d_input],
-        c_masks=[d['attention_mask'] for d in d_input]
+        qembs=outputs.qembs, 
+        dembs=outputs.dembs
     )
-    print(out.qemb.shape)
+    print(out)
 
 def test_biencder():
+    # modification
     from modifier import FeedbackQueryModifier
     model_opt = ModelOptions()
-    qr_encoder = test_q_encoder()
-    qf_encoder = deepcopy(qr_encoder)
+    encoder = test_q_encoder()
 
     biencoder = FeedbackQueryModifier(
-        model_opt,
-        qr_encoder=qr_encoder,
-        qf_encoder=qf_encoder,
+        model_opt, 
+        qr_encoder=encoder, 
+        qf_encoder=encoder,
+        d_encoder=encoder,
     )
 
-    input = tokenizer(['apple'], return_tensors='pt', padding=True)
-    input2 = tokenizer(['banana'], return_tensors='pt', padding=True)
-    input3 = tokenizer(['watermelon'], return_tensors='pt', padding=True)
-    input_ids = [input['input_ids'], input2['input_ids'], input3['input_ids']]
-    attention_mask = [input['attention_mask'], input2['attention_mask'], input3['attention_mask']]
+    # query
+    input = tokenizer(['apple', 'apple2', 'apple3'], return_tensors='pt', padding=True)
+    input2 = tokenizer(['banana', 'banana2', 'banana3'], return_tensors='pt', padding=True)
+    input3 = tokenizer(['watermelon', 'watermelon2', 'watermelon3'], return_tensors='pt', padding=True)
+    input4 = tokenizer(['aaa', 'bbb', 'ccc'], return_tensors='pt', padding=True)
 
+    # documents
     d_input = tokenizer(
         ['apple', 'apple and banana are good', 'apple and banana and watermelon are good'], 
         return_tensors='pt', 
         padding=True
     )
 
+    # B = 3 | N = 4 | M = 2
     out = biencoder.forward(
-        q_tokens=input_ids,
-        q_masks=attention_mask,
-        d_tokens=[d_input['input_ids']],
-        d_masks=[d_input['attention_mask']]
+        q_tokens=[input['input_ids'], input2['input_ids'], input3['input_ids'], input4['input_ids']],
+        q_masks=[input['attention_mask'], input2['attention_mask'], input3['attention_mask'], input4['input_ids']],
+        d_tokens=[d_input['input_ids'], d_input['input_ids']],
+        d_masks=[d_input['attention_mask'], d_input['attention_mask']],
     )
-    print(out)
+    print(out.qembs.shape)
+    print(out.dembs.shape)
+    print(out.scores.shape)
+    print(out.loss.shape)
+    return out
 
 def test_reward_wrapper():
     tokenizer = AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v0.6')

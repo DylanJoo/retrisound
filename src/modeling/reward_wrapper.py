@@ -43,34 +43,6 @@ class GenerativeRewardWrapper(nn.Module):
         for n, p in self.generator.named_parameters():
             p.requires_grad = False
 
-    # def inference(
-    #     self, 
-    #     queries=None,
-    #     query_tensors=None, 
-    #     batch_size=None
-    # ):
-    #     if batch_size is None:
-    #         return self._inference(queries, query_tensors, responses)
-    #     else:
-    #         query_tensors, response_tensors, responses = [], [], []
-    #         for i in range(0, queries.shape[0], batch_size):
-    #             b_queries = queries[i: i+batch_size]
-    #             if query_tensors is not None:
-    #                 qt, rt, r = self._inference(
-    #                     query_tensors=query_tensors[i: i+batch_size],
-    #                 )
-    #             else:
-    #                 qt, rt, r = self._inference(
-    #                     queries=queries[i: i+batch_size],
-    #                 )
-    #             query_tensors.append(qt)
-    #             response_tensors.append(rt)
-    #             responses.append(r)
-    #         query_tensors = torch.cat(query_tensors, 0)
-    #         response_tensors = torch.cat(response_tensors, 0)
-    #         responses += r
-    #         return query_tensors, response_tensors, responses
-
     def _inference(
         self, 
         queries=None,
@@ -258,3 +230,31 @@ class GenerativeRewardWrapper(nn.Module):
     #     torch.cuda.empty_cache()
     #     return logits, logprobs # B |r|
     #
+
+    # def inference(
+    #     self, 
+    #     queries=None,
+    #     query_tensors=None, 
+    #     batch_size=None
+    # ):
+    #     if batch_size is None:
+    #         return self._inference(queries, query_tensors, responses)
+    #     else:
+    #         query_tensors, response_tensors, responses = [], [], []
+    #         for i in range(0, queries.shape[0], batch_size):
+    #             b_queries = queries[i: i+batch_size]
+    #             if query_tensors is not None:
+    #                 qt, rt, r = self._inference(
+    #                     query_tensors=query_tensors[i: i+batch_size],
+    #                 )
+    #             else:
+    #                 qt, rt, r = self._inference(
+    #                     queries=queries[i: i+batch_size],
+    #                 )
+    #             query_tensors.append(qt)
+    #             response_tensors.append(rt)
+    #             responses.append(r)
+    #         query_tensors = torch.cat(query_tensors, 0)
+    #         response_tensors = torch.cat(response_tensors, 0)
+    #         responses += r
+    #         return query_tensors, response_tensors, responses

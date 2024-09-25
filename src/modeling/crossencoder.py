@@ -11,7 +11,7 @@ from transformers.modeling_outputs import BaseModelOutput
 
 @dataclass
 class ValueOutput(BaseModelOutput):
-    qemb: torch.FloatTensor = None
+    logits: torch.FloatTensor = None
     last_hidden_states: torch.FloatTensor = None
     loss: torch.FloatTensor = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
@@ -40,12 +40,13 @@ class ValueCrossEncoder(nn.Module):
         opt, 
         cross_encoder,
         d_encoder,
-        n_max_candidates=10,
+        n_max_candidates=None,
     ):
         super().__init__()
         self.opt = opt
+        # BERTForSequenceClassification
         self.cross_encoder = cross_encoder
-        self.d_encoder = d_encoder
+        self.d_encoder = d_encoder 
         self.n_max_candidates = n_max_candidates
 
     @staticmethod
@@ -54,68 +55,58 @@ class ValueCrossEncoder(nn.Module):
             x = x[:, None, :]
         return x
 
-    def _prepare_inputs(
-        self,
-        embed_1, 
-        embed_2, 
-        embeds_3,
-    ):
+    def _prepare_inputs(self, qemb, dembs):
         """ listwise re-ranker using embeddings to represent piece of texts """
         # prepare special tokens
         cls, sep, device = 101, 102, self.cross_encoder.device
         # size: [1, 2]
-        embeds = self.cross_encoder.embeddings(
-            torch.tensor([[cls, sep]]).repeat( (embed_1.size(0), 1) )
+        embeds = self.cross_encoder.bert.embeddings(
+            torch.tensor([[cls, sep]]).repeat( (qemb.size(0), 1) )
         ).to(device) 
         cls_emb = embeds[:, 0:1]
         sep_emb = embeds[:, 1:2]
 
         # prepare text embeddings
-        embed_1 = self._maybe_reshape(embed_1)
-        embed_2 = self._maybe_reshape(embed_2)
+        qemb = self._maybe_reshape(qemb) # B N H
+        dembs = self._maybe_reshape(dembs) # B M H
 
         # concat everything
-        embeds = torch.cat(
-            [cls_emb, embed_1, sep_emb, embed_2, sep_emb, embeds_3, sep_emb], axis=1
-        )
-        token_type_ids = torch.ones( (embed_1.size(0), (5+embeds_3.size(-2)+1)) , dtype=torch.long)
-        token_type_ids[:, :5] = 0
+        print(cls_emb.shape)
+        print(sep_emb.shape)
+        print(qemb.shape)
+        print(dembs.shape)
+        embeds = torch.cat([cls_emb, qemb, sep_emb, dembs, sep_emb], axis=1)
+        token_type_ids = torch.ones( (qemb.size(0), (3+dembs.size(-2)+1)) , dtype=torch.long)
+        token_type_ids[:, :3] = 0
 
         return {'input_ids': None,
                 'inputs_embeds': embeds.to(device), 
                 'attention_mask': None,
-                'token_type_ids': token_type_ids.to(device)}
+                'token_type_ids': token_type_ids.to(device),
+                'output_hidden_states': True}
 
     ## [NOTE] Rewards ~ r = CrossEncoder(E_qr, E_qf)
-    def forward(
-        self, 
-        qr_embed, 
-        qf_embed,
-        c_tokens,
-        c_masks,
-        **kwargs
-    ):
-        ## [CLS] <e_qr> [SEP] <e_qf> [SEP] <e_d1> <e_d2> ... [SEP]
-        loss, loss_r = 0.0, 0.0
-        n_candidates = len(c_tokens)
-        batch_size = c_tokens[0].size(0)
+    def forward(self, qembs, dembs, **kwargs):
+        ## [CLS] <e_q> [SEP] <e_d1> <e_d2> ... [SEP]
+        loss = 0.0
+        batch_size = qembs.size(0)
 
         # encode candidates
-        c_embeds = []
-        for i in range(n_candidates):
-            c_embed = self.d_encoder(c_tokens[i], c_masks[i]).emb  # B H
-            # get single embedding
-            c_embeds.append(c_embed)
-        c_embeds = torch.stack(c_embeds, dim=1) # B N_cand H
-
-        inputs = self._prepare_inputs(qr_embed, qf_embed, c_embeds)
-        model_output = self.cross_encoder(**inputs, **kwargs)
+        # B = 3 | N = 4 | M = 2
+        logits = []
+        print('debug')
+        for i in range(qembs.size(1)):
+            inputs = self._prepare_inputs(qembs[:, i], dembs) # (B (1) H) x (B M H)
+            model_output = self.cross_encoder(**inputs, **kwargs)
+            logits.append(model_output.logits)
+        logits = torch.stack(logits, dim=1)     # B M 2
+        logits = torch.max(logits, 1).values    # B 2
 
         return ValueOutput(
-            qemb=model_output.emb,
-            last_hidden_states=model_output.last_hidden_states,
-            loss=loss_r,
-            logs={'infoNCE': loss_r}
+            logits=logits,
+            last_hidden_states=model_output.hidden_states[-1], # this means nothing unless you check all
+            loss=loss,
+            logs={}
         )
 
     def gradient_checkpointing_enable(self, **kwargs):
