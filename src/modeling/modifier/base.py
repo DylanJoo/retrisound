@@ -29,6 +29,12 @@ class ModifierHead(nn.Module):
         output_size = (output_size or input_size)
         self.fc_1 = nn.Linear(input_size, input_size)
         self.fc_2 = nn.Linear(input_size, output_size)
+        # zero-init
+        if kwargs.pop('zero-init', False):
+            self.fc_1.weight.data.zero_()
+            self.fc_1.bias.data.zero_()
+            self.fc_2.weight.data.zero_()
+            self.fc_2.weight.data.zero_()
         dropout_prob = kwargs.pop("dropout_prob", 0.0)
         self.dropout = nn.Dropout(dropout_prob) if dropout_prob != 0.0 else nn.Identity()
 
@@ -91,7 +97,7 @@ class FeedbackQueryModifier(nn.Module):
                 qemb = self.qr_encoder(q_tokens[0], q_masks[0]).emb
             else:
                 qfemb = self.qf_encoder(q_tokens[i], q_masks[i]).emb  # B H
-                qemb = self.modifier(qembs[0], qfemb)
+                qemb = self.modifier(qembs[-1], qfemb) # can be either first q or modified q
             qembs.append(qemb)
         qembs = torch.stack(qembs, dim=1) # B N_seg H
 

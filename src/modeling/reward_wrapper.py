@@ -31,6 +31,24 @@ class Metric:
         results = torch.tensor(results['rouge1'])
         return results
 
+class Judgement:
+    def __init__(self, scales=None):
+        if scales:
+            self.scale = scales
+        else:
+            self.scale = list(range(0, 6)) # 0, 1, ...., 5
+
+    def compute(self, judgements):
+        pattern = re.compile(r"\d|-\d")
+
+        results = [0] * len(judgements)
+        for i, judgement in enumerate(judgements):
+            result = re.findall(pattern, judgement + "-1")[0]
+            result = min(self.scale) if len(result) == 0 else int(result)
+            results[i] = min(result, self.scale[-1])
+        results = torch.tensor(results).float()
+        return results
+
 class GenerativeRewardWrapper(nn.Module):
 
     def __init__(self, generator, tokenizer, utility, generation_config):
@@ -39,6 +57,8 @@ class GenerativeRewardWrapper(nn.Module):
         self.tokenizer = tokenizer
         self.utility = utility
         self.generator.generation_config = generation_config
+        self.generator.generation_config.pad_token_id = tokenizer.pad_token_id
+
         # freeze params
         for n, p in self.generator.named_parameters():
             p.requires_grad = False
@@ -46,7 +66,8 @@ class GenerativeRewardWrapper(nn.Module):
     def _inference(
         self, 
         queries=None,
-        query_tensors=None, 
+        query_tensors=None,
+        max_new_tokens=64
     ):
         default = self.tokenizer.padding_side
 
@@ -70,7 +91,7 @@ class GenerativeRewardWrapper(nn.Module):
             do_sample=True, 
             temperature=0.7,
             top_p=0.95,
-            max_new_tokens=64,
+            max_new_tokens=max_new_tokens,
         )
         responses = self.tokenizer.batch_decode(
             response_outputs[:, query_tensors.shape[1]:],
@@ -91,12 +112,17 @@ class GenerativeRewardWrapper(nn.Module):
         # return query_tensors, response_tensors, responses, test
         return query_tensors, response_tensors, responses
 
-    def get_rewards(self, predictions, targets):
-        results = self.utility.compute(
-            predictions=predictions,
-            references=targets,
-            use_aggregator=False
-        )
+    def get_rewards(self, predictions, targets=None):
+        if isinstance(self.utility, Metric):
+            results = self.utility.compute(
+                predictions=predictions,
+                references=targets,
+                use_aggregator=False
+            )
+
+        if isinstance(self.utility, Judgement):
+            results = self.utility.compute(judgements=predictions)
+
         return results
 
     @staticmethod

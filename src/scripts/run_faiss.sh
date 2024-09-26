@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
-#SBATCH --array=1-9%4
+#SBATCH --array=1-20%2
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 
@@ -14,15 +14,19 @@ conda activate pyserini
 
 # Start the experiment.
 # Setups
+RETRIEVER=OpenMatch/cocodr-base-msmarco
 HPARAMS_FILE=${HOME}/temp/hparams_encode_psgs_w100.txt
 
+# Generate embeddings
 python -m pyserini.encode input \
     --corpus ${DATASET_DIR}/wikipedia_split/raw/psgs_w100.jsonl \
     --fields text \
-    $(head -$SLURM_ARRAY_TASK_ID $HPARAMS_FILE | tail -1) \
-    --to-faiss encoder \
-    --encoder facebook/contriever-msmarco \
-    --encoder-class contriever \
+    $(head -$SLURM_ARRAY_TASK_ID $HPARAMS_FILE | tail -1) encoder \
+    --encoder ${RETRIEVER} \
+    --encoder-class auto \
+    --pooling cls \
     --fields text \
-    --batch 128 \
+    --batch 256 \
     --fp16  
+
+# Construct FAISS index

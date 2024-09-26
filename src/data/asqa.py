@@ -55,6 +55,7 @@ class ContextQADataset(Dataset):
         self.sub_questions = [None] * self.length
         self.sub_answers = [None] * self.length
         self.corpus = {-1: {'text': "", 'title': ""}}
+        self.n_feedbacks = [0] * self.length
 
         ## dynamic attributes
         # self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
@@ -122,8 +123,10 @@ class ContextQADataset(Dataset):
         try:
             i = self.feedbacks[idx].index("") # empty strings
             self.feedbacks[idx][i] = act
+            self.n_feedbacks[idx] += 1
         except: # means it's full
             self.feedbacks[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
+            self.n_feedbacks[idx] = 0
 
     def __getitem__(self, idx):
         qid = self.qids[idx]
@@ -135,6 +138,7 @@ class ContextQADataset(Dataset):
         return {'index': idx,
                 'questions': self.questions[idx], 
                 'feedbacks': self.feedbacks[idx],
+                'n_feedbacks': self.n_feedbacks[idx],
                 'answers': self.answers[idx],
                 'candidate_pids': cand_pids, 
                 'candidates': [self.corpus[pid] for pid in cand_pids],} # this is for reranker 
@@ -175,6 +179,7 @@ class ContextQACollator(DefaultDataCollator):
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
         batch['candidate_pids'] = [f['candidate_pids'] for f in features] 
+        batch['n_feedbacks'] = [f['n_feedbacks'] for f in features] 
         return batch
 
     def get_inputs_for_retriever(
@@ -196,7 +201,7 @@ class ContextQACollator(DefaultDataCollator):
             return_tensors='pt'
         ).to(device)
         batch_r['q_tokens'] = [initial_q['input_ids']]
-        batch_r['q_mask'] = [initial_q['attention_mask']]
+        batch_r['q_masks'] = [initial_q['attention_mask']]
 
         # encode the action/followup text segment-by-segment
         for seg_num in range(n_max_segments): 
@@ -210,12 +215,12 @@ class ContextQACollator(DefaultDataCollator):
                 return_tensors='pt'
             ).to(device)
             batch_r['q_tokens'].append(action_q['input_ids'])
-            batch_r['q_mask'].append(action_q['attention_mask'])
+            batch_r['q_masks'].append(action_q['attention_mask'])
 
         # encode the candidate texts
         candidate_size = len(features[0]['candidates'])
         batch_r['d_tokens'] = []
-        batch_r['d_mask'] = []
+        batch_r['d_masks'] = []
         for ctx in range(candidate_size):
             candidate = self.tokenizer_r.batch_encode_plus(
                 [f"{features[b]['candidates'][ctx]['title']} {features[b]['candidates'][ctx]['text']}" for b in range(batch_size)],
@@ -226,6 +231,6 @@ class ContextQACollator(DefaultDataCollator):
                 return_tensors='pt'
             ).to(device)
             batch_r['d_tokens'].append(candidate['input_ids'])
-            batch_r['d_mask'].append(candidate['attention_mask'])
+            batch_r['d_masks'].append(candidate['attention_mask'])
 
         return batch_r

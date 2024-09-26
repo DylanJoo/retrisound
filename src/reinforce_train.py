@@ -42,8 +42,12 @@ def main():
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     ada_retriever = FeedbackQueryModifier(
         model_opt,
-        qr_encoder=Contriever.from_pretrained(model_opt.retriever_name_or_path),
-        qf_encoder=Contriever.from_pretrained('bert-base-uncased').train(),
+        qr_encoder=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path
+        ),
+        qf_encoder=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path, pooling='cls'
+        ).train(),
     )
 
     # [Generator]
@@ -105,10 +109,11 @@ def main():
 
     # [trainer]
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from qlearning_trainer import Trainer
+    from reinforce_trainer import Trainer
     trainer = Trainer(
         reward_model=reward_model,
-        model=ada_reranker,
+        index_dir=model_opt.faiss_index_dir,
+        model=ada_retriever,
         tokenizer=tokenizer_g,
         args=train_opt,
         train_dataset=train_dataset,

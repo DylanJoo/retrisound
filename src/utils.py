@@ -39,7 +39,8 @@ def augmentation_response(
     candidates, 
     n_context,
     rankings=None,
-    dataset_prefix='asqa'
+    dataset_prefix='asqa',
+    answers=None
 ):
 
     # prepare contexts using ranking
@@ -55,8 +56,8 @@ def augmentation_response(
     ## loading dependencies
     if 'asqa' in dataset_prefix:
         apply_docs_prompt = asqa.apply_docs_prompt
-        apply_rsp_inst_prompt = asqa.apply_rsp_inst_prompt
-        instruction_prompt = asqa.instruction_prompt
+        apply_rsp_inst_prompt = asqa.apply_rsp_inst_prompt_new
+        instruction_prompt = asqa.instruction_prompt_new
 
     if 'qampari' in dataset_prefix:
         apply_docs_prompt = qampari.apply_docs_prompt
@@ -73,7 +74,7 @@ def augmentation_response(
             Q=questions[i], 
             D=D,
             instruction=instruction_prompt,
-            prefix="Answer:\n"
+            A=answers[i],
         )
         prompts.append(prompt)
 
@@ -145,7 +146,10 @@ def multiple_sample_and_log_probability(
     scores, 
     sample_size, 
     return_prob=True, 
-    batch=False
+    batch=False,
+    sort=False,
+    baseline=False,
+    tau=1
 ):
     if not batch:
         assert scores.dim() == 1
@@ -155,8 +159,13 @@ def multiple_sample_and_log_probability(
             log_probs = torch.zeros_like(subtracts, dtype=torch.float)
         rankings = []
         for j in range(scores.size(0)):
-            probs = nn.functional.softmax(scores - subtracts, dim=1) + 1e-10
-            posj = torch.multinomial(probs, 1).squeeze(-1)
+            probs = nn.functional.softmax( (scores - subtracts)/tau, dim=1) + 1e-10
+            if sort:
+                posj = torch.argmax(probs, 1).squeeze(-1)
+            elif baseline:
+                posj = j
+            else:
+                posj = torch.multinomial(probs, 1).squeeze(-1)
             rankings.append(posj)
             if return_prob:
                 log_probs[:, j] = probs[batch_index, posj].log()
@@ -167,6 +176,7 @@ def multiple_sample_and_log_probability(
             return rankings, log_probs
         else:
             return rankings
+
     else:
         assert scores.dim() == 2
         batch_size, candidiate_size = scores.size(0), scores.size(1)
@@ -182,14 +192,21 @@ def multiple_sample_and_log_probability(
         rankings = []
         for j in range(scores.size(1)):
             probs = nn.functional.softmax(
-                scores.unsqueeze(1) - subtracts, dim=-1) + 1e-10
-            posj = torch.multinomial(
-                probs.reshape(
-                    batch_size * sample_size,
-                    -1
-                ),
-                1
-            ).squeeze(-1).reshape(batch_size, sample_size)
+                (scores.unsqueeze(1) - subtracts)/tau, dim=-1) + 1e-10
+            if sort:
+                posj = torch.argmax(
+                    probs.reshape(batch_size * sample_size, -1),
+                    1
+                ).squeeze(-1).reshape(batch_size, sample_size)
+            elif baseline:
+                posj = torch.tensor(
+                    [j] * (batch_size * sample_size)
+                ).reshape(batch_size, sample_size)
+            else:
+                posj = torch.multinomial(
+                    probs.reshape(batch_size * sample_size, -1),
+                    1
+                ).squeeze(-1).reshape(batch_size, sample_size)
             rankings.append(posj)
             if return_prob:
                 log_probs[:, :, j] = probs[batch_index,

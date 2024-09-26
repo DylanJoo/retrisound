@@ -1,8 +1,8 @@
 #!/bin/sh
 #SBATCH --job-name=adarag
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_l40:1
-#SBATCH --mem=32G
+#SBATCH --gres=gpu:nvidia_rtx_a6000:2
+#SBATCH --mem=96G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
@@ -27,9 +27,6 @@ GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=facebook/contriever-msmarco
 
-MODEL_SIZE=1B
-BASE_LLM=TinyLlama/TinyLlama_v1.1
-
 MODEL_SIZE=8B
 BASE_LLM=meta-llama/Meta-Llama-3.1-8B
 
@@ -38,7 +35,6 @@ echo "$BATCH_SIZE_PER_GPU batch size per GPU"
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
-    --main_process_port 29501 \
     --mixed_precision bf16 \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
@@ -61,10 +57,13 @@ accelerate launch \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 2 \
-    --n_contexts 10 \
-    --n_max_segments 2 \
-    --n_max_candidates 10 \
-    --num_steps 1 \
+    --n_contexts 5 \
+    --n_max_segments 5 \
+    --n_max_candidates 5 \
+    --num_steps 5 \
+    --cont_coef 1.0 \
+    --rl_coef 1.0 \
     --bf16 true \
+    --faiss_index_dir /home/dju/indexes/wikipedia_split/contriever.psgs_w100.faissfull \
     --logging_steps 1
 

@@ -55,7 +55,6 @@ class Trainer(RewardTrainer):
             if t == 0:
                 retriever_inputs = inputs["inputs_for_retriever"]
             else: 
-                baseline = reward # last reward as baseline
                 del retriever_inputs, outputs
 
                 gc.collect()
@@ -84,7 +83,7 @@ class Trainer(RewardTrainer):
                 questions=questions, 
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
-                rankings=None if self.searcher is not None,
+                rankings=None,
                 dataset_prefix=self.args.dataset_prefix
             )
             response = []
@@ -99,7 +98,7 @@ class Trainer(RewardTrainer):
                 answers=response,
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
-                rankings=None if self.searcher is not None,
+                rankings=None,
                 dataset_prefix=self.args.dataset_prefix
             )
             feedback = []
@@ -114,12 +113,16 @@ class Trainer(RewardTrainer):
             reward = self.reward_model.get_rewards(response, targets).view(-1, 1)
             reward = reward.to(model.device)
 
+            if t == 0:
+                baseline = reward # first reward as baseline
+
         ## baseline can be the improved one-shot retrieval
         logprob = -1
         reinforce_loss = ((reward - baseline) * (-logprob)).mean()
         contrastive_loss = outputs.loss
 
-        loss = reinforce_loss + contrastive_loss
+        loss = (reinforce_loss * self.args.rl_coef) + \
+                (contrastive_loss * self.args.cont_coef)
 
         self.log({"train/reward": reward.mean().item()})
         self.log({"loss/RL": reinforce_loss.mean().item()})

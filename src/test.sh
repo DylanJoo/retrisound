@@ -26,11 +26,6 @@ GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=facebook/contriever-msmarco
-# BASE_RET=bert-base-uncased
-
-MODEL_SIZE=1B
-# BASE_LLM=allenai/OLMo-1B-hf
-BASE_LLM=TinyLlama/TinyLlama_v1.1
 
 MODEL_SIZE=8B
 BASE_LLM=meta-llama/Meta-Llama-3.1-8B
@@ -40,7 +35,6 @@ echo "$BATCH_SIZE_PER_GPU batch size per GPU"
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
-    --main_process_port 29501 \
     --mixed_precision bf16 \
     --num_machines 1 \
     --num_processes $NUM_GPUS \

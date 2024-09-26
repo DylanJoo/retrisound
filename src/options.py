@@ -44,10 +44,12 @@ class ReinforceOptions(RewardConfig):
     ampere_gpu: Optional[bool] = field(default=False)
     generation_batch: Optional[int] = field(default=None)
     report_to: Optional[str] = field(default="wandb")
+    cont_coef: Optional[float] = field(default=0.0)
+    rl_coef: Optional[float] = field(default=1.0)
 
 from trl.trainer.ppov2_config import PPOv2Config
 @dataclass
-class OffPolicyTrainOptions(PPOv2Config):
+class PolicyTrainOptions(PPOv2Config):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     n_contexts: Optional[int] = field(default=5)
     n_max_segments: Optional[int] = field(default=2)
@@ -71,9 +73,10 @@ class OffPolicyTrainOptions(PPOv2Config):
     max_grad_norm: float = field(default=0.5)
     target_kl: Optional[float] = field(default=None)
     cont_coef: Optional[float] = field(default=0.0)
-    rl_coef: Optional[float] = field(default=1.0)
+    kl_coef: Optional[float] = field(default=0.05)
     reward_function: Optional[str] = field(default='metric')
     ampere_gpu: Optional[bool] = field(default=False)
     generation_batch: Optional[int] = field(default=None)
     world_size: Optional[int] = field(default=1)
     report_to: Optional[str] = field(default="wandb")
+    num_ppo_epochs: int = 4
