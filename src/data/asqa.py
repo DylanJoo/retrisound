@@ -25,10 +25,10 @@ class ContextQADataset(Dataset):
         n_max_segments=10,
         n_max_candidates=10,
         depth=30,
-        budget=5,
         corpus_file=None,
         retrieval_file=None,
-        quick_test=None
+        quick_test=None,
+        half_with_bottom=False
     ):
         with open(data_file, 'r') as f:
             raw_data = json.load(f)['train']
@@ -47,6 +47,8 @@ class ContextQADataset(Dataset):
         self.length = len(data)
         self.n_max_segments = n_max_segments
         self.n_max_candidates = n_max_candidates
+        self.depth = depth
+        self.half_with_bottom = half_with_bottom
 
         ## fixed attributes 
         self.qids = [None] * self.length
@@ -59,7 +61,7 @@ class ContextQADataset(Dataset):
 
         ## dynamic attributes
         # self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
-        self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
+        self.feedbacks = [ ["" for _ in range(self.n_max_segments)]  for _ in range(self.length)]
         self._build(data)
 
         ## results for context candidates
@@ -72,10 +74,6 @@ class ContextQADataset(Dataset):
         if corpus_file is not None:
             self._load_corpus(corpus_file)
 
-        ## add context buffer count
-        ## None means everything
-        self.depth = depth
-        self.budget = budget
 
     def _build(self, data):
         for idx in range(self.length):
@@ -94,10 +92,17 @@ class ContextQADataset(Dataset):
         with open(file, 'r') as f:
             for line in tqdm(f):
                 qid, _, docid, rank, score, _ = line.strip().split()
-                if int(rank) <= self.n_max_candidates:
+                if int(rank) <= self.depth:
                     self.candidate_pids[qid].append(docid)
                     self.corpus[docid] = {'text': "", 'title': ""}
                     # remove this if `_load_corpus` doesn't need to predefine
+
+        if self.half_with_bottom:
+            for qid in self.candidate_pids:
+                n_half = (self.n_max_candidates // 2)
+                first_half = self.candidate_pids[qid][:n_half]
+                second_half = self.candidate_pids[qid][-n_half:]
+                self.candidate_pids[qid] = (first_half + second_half)
 
     def _load_corpus(self, dir):
         from multiprocessing import Pool
@@ -126,7 +131,7 @@ class ContextQADataset(Dataset):
             self.n_feedbacks[idx] += 1
         except: # means it's full
             self.feedbacks[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
-            self.n_feedbacks[idx] = 0
+            self.n_feedbacks[idx] = 1
 
     def __getitem__(self, idx):
         qid = self.qids[idx]

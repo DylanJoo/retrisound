@@ -113,6 +113,7 @@ class Trainer(PPOv2Trainer):
         self.args = config
         args = config
         self.tokenizer = tokenizer
+        os.environ["WANDB_PROJECT"] = (config.wandb_project or "debug")
 
         self.policy = policy
         self.reward_model = reward_model
@@ -162,7 +163,7 @@ class Trainer(PPOv2Trainer):
         )  # we may train for more than `total_episodes`
         time_tensor = torch.tensor(int(time.time()), device=accelerator.device)
         time_int = broadcast(time_tensor, 0).item()  # avoid different timestamps across processes
-        args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
+        self.args.time_int = time_int
         self.local_seed = args.seed + accelerator.process_index * 100003  # Prime
         if args.num_sample_generations > 0:
             self.sample_generations_freq = max(1, args.num_total_batches // args.num_sample_generations)
@@ -250,8 +251,10 @@ class Trainer(PPOv2Trainer):
 
     def train(self):
         args = self.args
-        with open('logs/arguments.txt', 'w') as f:
+        with open(f'logs/trajectory-{args.time_int}.json', 'w') as f:
             f.write(json.dumps(dataclasses.asdict(args))+'\n')
+            f.write(json.dumps(dataclasses.asdict(args))+'\n')
+            f.write('====Result below====')
 
         self.save_model(args.output_dir, _internal_call=False)
         accelerator = self.accelerator
@@ -278,6 +281,7 @@ class Trainer(PPOv2Trainer):
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
         vf_loss_stats = torch.zeros(stats_shape, device=device)
+        cont_loss_stats = torch.zeros(stats_shape, device=device)
         vf_clipfrac_stats = torch.zeros(stats_shape, device=device)
         # entropy_stats = torch.zeros(stats_shape, device=device)
         ratio_stats = torch.zeros(stats_shape, device=device)
@@ -319,6 +323,7 @@ class Trainer(PPOv2Trainer):
 
             #### sampled trajetories
             logprobs = []
+            ref_logprobs = []
             rankings = []
             responses = []
             feedbacks = []
@@ -337,10 +342,9 @@ class Trainer(PPOv2Trainer):
 
             with torch.no_grad():
 
+                outputs = policy(**retriever_inputs, max_num_steps=max_num_steps)
                 for n in range(max_num_steps):
                     # policy forward (encoding)
-                    # print('n is', n)
-                    outputs = policy(**retriever_inputs, include_n_feedbacks=n+1)
                     qemb = outputs.qembs[:, :(n+1), :] # B N H
                     dembs = outputs.dembs              # B M H
                     modified_scores = torch.einsum("bnd, bkd->bnk", qemb/tau, dembs)
@@ -352,16 +356,16 @@ class Trainer(PPOv2Trainer):
                     )
                     ranking = ranking.squeeze(1) 
                     # logprob = logprob.squeeze(1)
-                    # print(ranking.shape)
-                    # print(logprob.shape)
 
-                    # reference logprob could be 
-                    # (1) original bm25 ranking (with reciprocal ranking as scores)
-                    # (2) original bm25 ranking (with re-sorted relevance scores)
+                    if n == 0:
+                        # reference logprob could be 
+                        # _, ref_logprob = multiple_sample_and_log_probability(
+                        #     modified_scores, 1, batch=True, baseline=True
+                        # )
+                        ref_logprob = logprob.clone()
 
                     # value
-                    # value = value_model(qemb, dembs).logits
-                    value = value_model(qemb, dembs).logprobs
+                    value = value_model(qemb, dembs).scores
                     gen_batch = len(prompt) if args.generation_batch is None else args.generation_batch
 
                     # Response generation and Reward
@@ -377,7 +381,7 @@ class Trainer(PPOv2Trainer):
                     for i in range(0, len(prompt), gen_batch):
                         _, _, b_response = self.reward_model._inference(
                             prompt[i:i+gen_batch],
-                            max_new_tokens=8 # for judge
+                            max_new_tokens=4 # for judge
                         )
                         b_response = [r.rsplit('Question', 1)[0] for r in b_response]
                         response += b_response
@@ -405,19 +409,22 @@ class Trainer(PPOv2Trainer):
                         self.train_dataset.add_feedback(data_indices[i], feedback[i])
 
                     # append the trajetory at t step and n segment
-                    logprobs.append(logprob) # B 1
-                    values.append(value)     # B 2
-                    reward_scores.append(reward_score)   # B 1
+                    logprobs.append(logprob)           # B 1
+                    ref_logprobs.append(ref_logprob)   # B 1
+                    values.append(value)               # B 1
+                    reward_scores.append(reward_score) # B 1
 
-                logprobs = torch.stack(logprobs, 1)[:, :, 0]  # B N 1
-                values = torch.stack(values, 1)[:, :, 1]      # B N 1 
-                reward_scores = torch.stack(reward_scores, 1)[:, :, 0]    # B N 1
+                logprobs = torch.stack(logprobs, 1)[:, :, 0]           # B N 1
+                ref_logprobs = torch.stack(ref_logprobs, 1)[:, :, 0]   # B 1 1
+                values = torch.stack(values, 1)[:, :, -1]              # B N 1 
+                reward_scores = torch.stack(reward_scores, 1)[:, :, 0] # B N 1
                 # del (logprob, ref_logprob, value, outputs)
                 torch.cuda.empty_cache()
                 gc.collect()
 
                 # 4. compute rewards
-                kl = logprobs - (-0.301) 
+                # ref_logprobs = 0
+                kl = logprobs - ref_logprobs
                 non_score_reward = -args.kl_coef * kl
                 rewards = non_score_reward + reward_scores
 
@@ -445,7 +452,7 @@ class Trainer(PPOv2Trainer):
                 torch.cuda.empty_cache()
 
             ##### check trajectory here #####
-            with open('trajectory.json', 'a') as f:
+            with open(f'logs/trajectory-{args.time_int}.json', 'a') as f:
                 data = [self.train_dataset[idx] for idx in data_indices]
                 for i, d in enumerate(data):
                     _ = [d.pop(k) for k in ['index', 'n_feedbacks', 'candidate_pids', 'candidates']]
@@ -489,22 +496,22 @@ class Trainer(PPOv2Trainer):
                             new_values = []
                             # for n in range(len(mb_retriever_inputs['q_tokens'])):
                             for n in range(max_num_steps):
-                                qemb = outputs.qembs[:, n, :]  # b H
+                                qemb = outputs.qembs[:, :(n+1), :]  # b H
                                 dembs = outputs.dembs          # b M H
-                                modified_scores = torch.einsum("bd, bkd->bk", qemb/tau, dembs)
+                                modified_scores = torch.einsum("bnd, bkd->bnk", qemb/tau, dembs)
+                                modified_scores = torch.max(modified_scores, 1).values
                                 new_ranking, new_logprob = multiple_sample_and_log_probability(
                                     modified_scores, 1, batch=True, sort=True
                                 )
                                 new_ranking = new_ranking.squeeze(1) 
-                                # new_value = value_model(qemb, dembs).logits
-                                new_value = value_model(qemb, dembs).logprobs
+                                new_value = value_model(qemb, dembs).labels
 
                                 # append the trajetory at t step and n segment
                                 new_logprobs.append(new_logprob) # b 1
                                 new_values.append(new_value)    # b 2
 
                             new_logprobs = torch.stack(new_logprobs, 1)[:, :, 0]
-                            vpred = new_values = torch.stack(new_values, 1)[:, :, 1]
+                            vpred = new_values = torch.stack(new_values, 1)[:, :, -1]
                             vpredclipped = torch.clamp(
                                 vpred,
                                 mb_values - args.cliprange_value,
@@ -522,8 +529,10 @@ class Trainer(PPOv2Trainer):
                             pg_losses = -mb_advantage * ratio
                             pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                             pg_loss_max = torch.max(pg_losses, pg_losses2)
-                            pg_loss = vanilla_mean(pg_loss_max)
-                            loss = pg_loss + args.vf_coef * vf_loss
+                            pg_loss = vanilla_mean(pg_loss_max) 
+                            pg_loss = pg_loss if args.debugging is False else 0
+                            cont_loss = outputs.loss
+                            loss = (pg_loss + args.vf_coef * vf_loss) * args.rl_coef + (args.cont_coef * cont_loss)
                             accelerator.backward(loss)
                             optimizer.step()
                             optimizer.zero_grad()
@@ -542,6 +551,7 @@ class Trainer(PPOv2Trainer):
                                 vf_clipfrac_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
                                     vf_clipfrac
                                 )
+                                cont_loss_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = cont_loss
                                 # entropy_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                                 ratio_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
@@ -575,6 +585,7 @@ class Trainer(PPOv2Trainer):
                 metrics["policy/clipfrac_avg"] = self.accelerator.gather(pg_clipfrac_stats).mean().item()
                 metrics["loss/policy_avg"] = self.accelerator.gather(pg_loss_stats).mean().item()
                 metrics["loss/value_avg"] = self.accelerator.gather(vf_loss_stats).mean().item()
+                metrics["loss/contrastive_avg"] = self.accelerator.gather(cont_loss_stats).mean().item()
                 metrics["val/clipfrac_avg"] = self.accelerator.gather(vf_clipfrac_stats).mean().item()
                 # metrics["policy/entropy_avg"] = self.accelerator.gather(entropy_stats).mean().item()
                 metrics["val/ratio"] = self.accelerator.gather(ratio_stats).mean().item()

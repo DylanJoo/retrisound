@@ -40,19 +40,21 @@ def main():
     ## Config & tokenizer
     from modeling import Contriever, FeedbackQueryModifier, ValueCrossEncoder
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-    encoder = Contriever.from_pretrained(model_opt.retriever_name_or_path, pooling='cls')
+    encoder = Contriever.from_pretrained(model_opt.retriever_name_or_path, pooling='cls').eval()
     ada_retriever = FeedbackQueryModifier(
         model_opt,
         qr_encoder=encoder,
         qf_encoder=Contriever.from_pretrained(model_opt.retriever_name_or_path, pooling='cls').train(),
+        fusion_type=model_opt.fusion_type,
+        zero_init=model_opt.zero_init
     )
 
     from transformers import BertForSequenceClassification
     crossencoder = ValueCrossEncoder(
         model_opt,
-        cross_encoder=BertForSequenceClassification.from_pretrained("bert-base-uncased"),
+        cross_encoder=BertForSequenceClassification.from_pretrained(model_opt.retriever_name_or_path),
         d_encoder=encoder,
-        n_max_candidates=10
+        n_max_candidates=train_opt.n_max_candidates,
     ).train()
 
     # [Generator]
@@ -85,7 +87,7 @@ def main():
     reward_model = GenerativeRewardWrapper(
         generator=llm, 
         tokenizer=tokenizer_g, 
-        utility=Judgement([0, 1, 2, 3]),
+        utility=Judgement([0, 1, 2]),
         generation_config=generation_config
     ).eval()
 
@@ -95,19 +97,16 @@ def main():
         from data.qampari import ContextQADataset, ContextQACollator
     elif 'asqa' in train_opt.dataset_prefix:
         from data.asqa import ContextQADataset, ContextQACollator
-    else:
-        print(train_opt.dataset_prefix)
-        raise ValueError('no available dataset')
 
     train_dataset = ContextQADataset(
         data_file=data_opt.train_file, 
         n_max_segments=train_opt.n_max_segments,
         n_max_candidates=train_opt.n_max_candidates,
-        budget=model_opt.num_budget,
         depth=data_opt.depth,
         corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
-        quick_test=train_opt.quick_test
+        quick_test=train_opt.quick_test,
+        half_with_bottom=train_opt.half_with_bottom
     )
 
     ## data ollator

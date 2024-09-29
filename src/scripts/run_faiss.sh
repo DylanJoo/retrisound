@@ -1,32 +1,30 @@
 #!/bin/sh
-#SBATCH --job-name=encode
-#SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_rtx_a6000:1
-#SBATCH --mem=32G
+#SBATCH --job-name=faiss
+#SBATCH --cpus-per-task=32
 #SBATCH --nodes=1
-#SBATCH --array=1-20%2
-#SBATCH --time=72:00:00
-#SBATCH --output=logs/%x-%j.out
+#SBATCH --mem=128G
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=06:00:00
+#SBATCH --output=%x.%j.out
 
 # Set-up the environment.
 source ${HOME}/.bashrc
-conda activate pyserini
+conda activate retrisound
 
 # Start the experiment.
 # Setups
 RETRIEVER=OpenMatch/cocodr-base-msmarco
 HPARAMS_FILE=${HOME}/temp/hparams_encode_psgs_w100.txt
 
-# Generate embeddings
-python -m pyserini.encode input \
-    --corpus ${DATASET_DIR}/wikipedia_split/raw/psgs_w100.jsonl \
-    --fields text \
-    $(head -$SLURM_ARRAY_TASK_ID $HPARAMS_FILE | tail -1) encoder \
-    --encoder ${RETRIEVER} \
-    --encoder-class auto \
-    --pooling cls \
-    --fields text \
-    --batch 256 \
-    --fp16  
-
 # Construct FAISS index
+# for num in {0..19};do
+#     python -m pyserini.index.faiss \
+#         --input ${INDEX_DIR}/wikipedia_split/cocodr.psgs_w100.encoded/cocodr.psgs_w100.faiss$num \
+#         --output ${INDEX_DIR}/wikipedia_split/cocodr.psgs_w100.faiss-pq-$num \
+#         --pq
+# done
+
+python -m pyserini.index.merge_faiss_indexes \
+    --prefix ${INDEX_DIR}/wikipedia_split/cocodr.psgs_w100.faiss-pq- \
+    --shard-num 20
+

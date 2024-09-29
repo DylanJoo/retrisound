@@ -15,6 +15,8 @@ class ModelOptions:
     tau: Optional[float] = field(default=1.0)
     num_budget: Optional[int] = field(default=5)
     max_new_tokens: Optional[int] = field(default=32)
+    fusion_type: Optional[str] = field(default='ff')
+    zero_init: bool = field(default=False)
 
 @dataclass
 class DataOptions:
@@ -54,7 +56,6 @@ class PolicyTrainOptions(PPOv2Config):
     n_contexts: Optional[int] = field(default=5)
     n_max_segments: Optional[int] = field(default=2)
     n_max_candidates: Optional[int] = field(default=10)
-    run_name: Optional[str] = field(default='testing')
     wandb_project: Optional[str] = field(default='adarag')
     max_steps: int = field(default=-1) # different from HF's  
     num_processes: Optional[int] = field(default=1)
@@ -73,10 +74,14 @@ class PolicyTrainOptions(PPOv2Config):
     max_grad_norm: float = field(default=0.5)
     target_kl: Optional[float] = field(default=None)
     cont_coef: Optional[float] = field(default=0.0)
+    rl_coef: Optional[float] = field(default=1.0)
     kl_coef: Optional[float] = field(default=0.05)
     reward_function: Optional[str] = field(default='metric')
     ampere_gpu: Optional[bool] = field(default=False)
     generation_batch: Optional[int] = field(default=None)
     world_size: Optional[int] = field(default=1)
     report_to: Optional[str] = field(default="wandb")
+    run_name: Optional[str] = field(default="test")
     num_ppo_epochs: int = 4
+    half_with_bottom: bool = field(default=False)
+    debugging: bool = field(default=False)

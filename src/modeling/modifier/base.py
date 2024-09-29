@@ -19,18 +19,13 @@ class BiencoderOutput(BaseModelOutput):
     scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
 
-class ModifierHead(nn.Module):
-    """
-    Type1: fuse two independant embeddings (query-request and query-feedback)
-        - query = Porj (query-request (B 1 H), query-feedback (B 1 H))
-    """
-    def __init__(self, input_size, output_size=None, **kwargs):
+class FFModifierHead(nn.Module):
+    def __init__(self, input_size, output_size=None, zero_init=False, **kwargs):
         super().__init__()
         output_size = (output_size or input_size)
         self.fc_1 = nn.Linear(input_size, input_size)
         self.fc_2 = nn.Linear(input_size, output_size)
-        # zero-init
-        if kwargs.pop('zero-init', False):
+        if zero_init:
             self.fc_1.weight.data.zero_()
             self.fc_1.bias.data.zero_()
             self.fc_2.weight.data.zero_()
@@ -46,6 +41,19 @@ class ModifierHead(nn.Module):
         output = self.fc_2(self.fc_1(output))
         return output
 
+class PlusModifierHead(nn.Module):
+    def __init__(self, input_size, output_size=None, zero_init=False, **kwargs):
+        super().__init__()
+        output_size = (output_size or input_size)
+        self.fc = nn.Linear(input_size, input_size)
+        if zero_init:
+            self.fc.weight.data.zero_()
+            self.fc.bias.data.zero_()
+
+    def forward(self, qremb, qfemb):
+        qfemb = self.fc(qfemb)
+        return qremb + qfemb
+
 class FeedbackQueryModifier(nn.Module):
 
     def __init__(
@@ -54,7 +62,9 @@ class FeedbackQueryModifier(nn.Module):
         qr_encoder, 
         qf_encoder=None,
         d_encoder=None,
-        n_candidates=None
+        n_candidates=None,
+        fusion_type='ff',
+        zero_init=False
     ):
         super().__init__()
         self.opt = opt
@@ -65,10 +75,18 @@ class FeedbackQueryModifier(nn.Module):
         self.qr_encoder = qr_encoder
         self.qf_encoder = (qf_encoder or qr_encoder)
         self.d_encoder = (d_encoder or qr_encoder)
-        self.modifier = ModifierHead(
-            qr_encoder.config.hidden_size + qf_encoder.config.hidden_size,
-            qr_encoder.config.hidden_size
-        )
+        if fusion_type == 'ff':
+            self.modifier = FFModifierHead(
+                qr_encoder.config.hidden_size + qf_encoder.config.hidden_size,
+                qr_encoder.config.hidden_size,
+                zero_init=zero_init
+            )
+        if fusion_type == 'plus':
+            self.modifier = PlusModifierHead(
+                qf_encoder.config.hidden_size,
+                qf_encoder.config.hidden_size,
+                zero_init=zero_init
+            )
 
         for n, p in self.named_parameters():
             if 'd_encoder' in n:
@@ -87,14 +105,16 @@ class FeedbackQueryModifier(nn.Module):
         **kwargs
     ):
         n_segments = len(q_tokens)
-        include_n_feedbacks = kwargs.pop('include_n_feedbacks', n_segments)
+        max_num_steps = kwargs.pop('max_num_steps', n_segments)
         batch_size = q_tokens[0].size(0)
 
         # encode query request and query feedback
         qembs = []
-        for i in range(include_n_feedbacks):
+        for i in range(max_num_steps):
             if i == 0:
                 qemb = self.qr_encoder(q_tokens[0], q_masks[0]).emb
+                qfemb = self.qf_encoder(q_tokens[0], q_masks[0]).emb  # B H
+                qemb = self.modifier(qemb, qfemb) # can be either first q or modified q
             else:
                 qfemb = self.qf_encoder(q_tokens[i], q_masks[i]).emb  # B H
                 qemb = self.modifier(qembs[-1], qfemb) # can be either first q or modified q
