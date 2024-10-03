@@ -97,11 +97,13 @@ class ContextQADataset(Dataset):
                     self.corpus[docid] = {'text': "", 'title': ""}
                     # remove this if `_load_corpus` doesn't need to predefine
 
+        qids = list(self.candidate_pids.keys())
         if self.half_with_bottom:
-            for qid in self.candidate_pids:
+            for i, qid in enumerate(self.candidate_pids):
                 n_half = (self.n_max_candidates // 2)
                 first_half = self.candidate_pids[qid][:n_half]
-                second_half = self.candidate_pids[qid][-n_half:]
+                # second_half = self.candidate_pids[qid][-n_half:]
+                second_half = self.candidate_pids[qids[max(0, i-1)]][-n_half:]
                 self.candidate_pids[qid] = (first_half + second_half)
 
     def _load_corpus(self, dir):

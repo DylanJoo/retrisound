@@ -64,7 +64,7 @@ class ValueCrossEncoder(nn.Module):
         # concat everything
         embeds = torch.cat([cls_emb, qemb, sep_emb, dembs, sep_emb], axis=1)
         token_type_ids = torch.ones( (embeds.size(0), embeds.size(1)) , dtype=torch.long)
-        token_type_ids[:, :3] = 0
+        token_type_ids[:, :(embeds.size(1))] = 0
 
         return {'input_ids': None,
                 'inputs_embeds': embeds,

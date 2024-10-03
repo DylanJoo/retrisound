@@ -39,13 +39,16 @@ class Judgement:
             self.scale = list(range(0, 6)) # 0, 1, ...., 5
 
     def compute(self, judgements):
-        pattern = re.compile(r"\d|-\d")
+        pattern = re.compile(r"[\d\.\d]+")
 
         results = [0] * len(judgements)
         for i, judgement in enumerate(judgements):
             result = re.findall(pattern, judgement + "-1")[0]
-            result = min(self.scale) if len(result) == 0 else int(result)
-            results[i] = min(result, self.scale[-1])
+            try:
+                result = min(self.scale) if len(result) == 0 else float(result)
+                results[i] = min(result, self.scale[-1])
+            except:
+                results[i] = float(0)
         results = torch.tensor(results).float()
         return results
 
@@ -132,6 +135,8 @@ class GenerativeRewardWrapper(nn.Module):
         texts = re.sub(pattern, ' ', texts).strip()
         pattern = re.compile(r"\n")
         texts = re.sub(pattern, ' ', texts).strip()
+        ## remove q tag
+        texts = texts.split('</q>')[0]
         return texts
 
     @torch.no_grad()

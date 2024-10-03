@@ -253,14 +253,13 @@ class Trainer(PPOv2Trainer):
         args = self.args
         with open(f'logs/trajectory-{args.time_int}.json', 'w') as f:
             f.write(json.dumps(dataclasses.asdict(args))+'\n')
-            f.write(json.dumps(dataclasses.asdict(args))+'\n')
             f.write('====Result below====')
 
         self.save_model(args.output_dir, _internal_call=False)
         accelerator = self.accelerator
         optimizer = self.optimizer
         model = self.model
-        policy = self.policy
+        policy = model.policy
         # ref_policy = self.ref_policy
         reward_model = self.reward_model
         value_model = self.value_model
@@ -334,15 +333,22 @@ class Trainer(PPOv2Trainer):
             data = next(iter_dataloader)
             data_indices = data["index"]
             # State includes question, candidates (and feedback)
-            retriever_inputs = data["inputs_for_retriever"]
             questions = data["questions"]
             candidates = data["candidates"]
             targets = data["targets"]
             max_num_steps = max(data['n_feedbacks']) + 1
 
+            if max_num_steps <= 1:
+                retriever_inputs = data["inputs_for_retriever"]
+            else:
+                retriever_inputs = self.data_collator.get_inputs_for_retriever(
+                    [self.train_dataset[idx] for idx in data_indices],
+                    device=device
+                )
+            outputs = policy(**retriever_inputs, max_num_steps=max_num_steps)
+
             with torch.no_grad():
 
-                outputs = policy(**retriever_inputs, max_num_steps=max_num_steps)
                 for n in range(max_num_steps):
                     # policy forward (encoding)
                     qemb = outputs.qembs[:, :(n+1), :] # B N H
@@ -391,7 +397,6 @@ class Trainer(PPOv2Trainer):
                     # Feedback generation and write
                     prompt = augmentation_feedback(
                         questions=questions, 
-                        answers=response,
                         candidates=candidates, 
                         n_context=self.args.n_contexts,
                         rankings=ranking,
@@ -456,7 +461,9 @@ class Trainer(PPOv2Trainer):
                 data = [self.train_dataset[idx] for idx in data_indices]
                 for i, d in enumerate(data):
                     _ = [d.pop(k) for k in ['index', 'n_feedbacks', 'candidate_pids', 'candidates']]
-                    d['response'] = response[i]
+                    r = reward_scores.mean(1).cpu().tolist()[i]
+                    f.write(f"reward_score:\t{r}\n")
+                    d['reward_scores'] = r
                     json.dump(d, f)
                     f.write('\n')
 
@@ -504,7 +511,7 @@ class Trainer(PPOv2Trainer):
                                     modified_scores, 1, batch=True, sort=True
                                 )
                                 new_ranking = new_ranking.squeeze(1) 
-                                new_value = value_model(qemb, dembs).labels
+                                new_value = value_model(qemb, dembs).scores
 
                                 # append the trajetory at t step and n segment
                                 new_logprobs.append(new_logprob) # b 1
@@ -522,10 +529,10 @@ class Trainer(PPOv2Trainer):
                             vf_loss_max = torch.max(vf_losses1, vf_losses2)
                             vf_loss = 0.5 * vanilla_mean(vf_loss_max)
                             vf_clipfrac = vanilla_mean((vf_losses2 > vf_losses1).float())
-                            # print(new_logprobs.shape)
-                            # print(mb_logprobs.shape)
                             logprobs_diff = new_logprobs - mb_logprobs
                             ratio = torch.exp(logprobs_diff)
+                            print(torch.argsort(modified_scores, -1, True))
+                            print(mb_advantage)
                             pg_losses = -mb_advantage * ratio
                             pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                             pg_loss_max = torch.max(pg_losses, pg_losses2)

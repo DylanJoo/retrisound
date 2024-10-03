@@ -20,21 +20,23 @@ export CUDA_HOME=/usr/local/cuda
 # Setups
 NUM_GPUS=1
 BATCH_SIZE_PER_GPU=32
-TOTAL_BATCH_SIZE=64
+TOTAL_BATCH_SIZE=32
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=OpenMatch/cocodr-base-msmarco
 MODEL_SIZE=1B
 BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
 
-RUN='(ff-vs-plus)cocodr-bm25-k=10/10/100-modifier-plus'
+RUN='(half-random-zero-init)10/10/100-modifier-plus'
 
 deepspeed --num_gpus $NUM_GPUS --master_port 29600 ppo.py \
     --num_processes $NUM_GPUS \
     --wandb_project debug \
     --run_name $RUN \
-    --half_with_bottom \
     --fusion_type plus \
+    --half_with_bottom \
+    --zero_init \
+    --gamma 0.01 \
     --bf16 \
     --deepspeed configs/zero2_config_accelerate.json \
     --retriever_name_or_path $BASE_RET \
@@ -63,8 +65,8 @@ deepspeed --num_gpus $NUM_GPUS --master_port 29600 ppo.py \
 	--num_steps 5 \
 	--reward_function metric \
 	--generation_batch 1 \
-	--kl_coef 0.01 \
 	--cont_coef 0.0 \
+	--cliprange 0.2 \
     --max_steps 5000 \
     --save_steps 1000 \
     --logging_steps 1

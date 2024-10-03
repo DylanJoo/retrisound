@@ -45,14 +45,18 @@ class PlusModifierHead(nn.Module):
     def __init__(self, input_size, output_size=None, zero_init=False, **kwargs):
         super().__init__()
         output_size = (output_size or input_size)
-        self.fc = nn.Linear(input_size, input_size)
+        self.fc = None
         if zero_init:
+            self.fc = nn.Linear(input_size, input_size)
             self.fc.weight.data.zero_()
             self.fc.bias.data.zero_()
 
     def forward(self, qremb, qfemb):
-        qfemb = self.fc(qfemb)
-        return qremb + qfemb
+        if self.fc is None:
+            return (qremb + qfemb)/2
+        else:
+            qfemb = self.fc(qfemb)
+            return qremb + qfemb
 
 class FeedbackQueryModifier(nn.Module):
 
@@ -133,10 +137,11 @@ class FeedbackQueryModifier(nn.Module):
                 demb = self.d_encoder(d_tokens[i], d_masks[i]).emb  # B H
                 dembs.append(demb)
             dembs = torch.stack(dembs, dim=1) # B N_cand H
-            scores = torch.einsum("ind, jd->nij", qembs/self.tau, dembs[:, 0, :]) # N B B
+
+            scores = (qembs[:, 0, :]/self.tau) @ (dembs[:, 0, :]).T
+            # scores = torch.einsum("ind, jd->inj", qembs[:, 0, :]/self.tau, dembs[:, 0, :]) # N B B
             labels = torch.arange(0, batch_size, dtype=torch.long, device=qembs.device)
-            loss_r = CELoss(scores[0, :, :], labels) # first query and document
-            # loss_r = CELoss(scores[-1, :, :], labels) # last query and document
+            loss_r = CELoss(scores, labels) # first query and document
 
         return BiencoderOutput(
             qembs=qembs,

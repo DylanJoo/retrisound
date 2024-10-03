@@ -82,7 +82,6 @@ def augmentation_response(
 
 def augmentation_feedback(
     questions, 
-    answers, 
     candidates, 
     n_context, 
     rankings=None,
@@ -117,10 +116,9 @@ def augmentation_feedback(
         D = apply_docs_prompt(contexts[i], field='text')
         prompt = apply_fbk_inst_prompt(
             Q=questions[i], 
-            A=answers[i],
             D=D,
             instruction=fbk_instruction_prompt,
-            prefix="Keywords:\n"
+            prefix='Follow-up query:\n<q>'
         )
         prompts.append(prompt)
 

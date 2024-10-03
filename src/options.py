@@ -84,4 +84,5 @@ class PolicyTrainOptions(PPOv2Config):
     run_name: Optional[str] = field(default="test")
     num_ppo_epochs: int = 4
     half_with_bottom: bool = field(default=False)
+    gamma: float = 0.5
     debugging: bool = field(default=False)
