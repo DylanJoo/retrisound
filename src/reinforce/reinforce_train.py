@@ -38,27 +38,17 @@ def main():
 
     # [Retriever]
     ## Config & tokenizer
-    from modeling import RMTEncoder, AdaptiveReranker, Contriever
+    from modeling import Contriever, FeedbackQueryModifier
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-    ada_encoder = RMTEncoder(
-        base_model=Contriever.from_pretrained(model_opt.retriever_name_or_path),
-        tokenizer=tokenizer_r,
-        num_mem_tokens=model_opt.num_mem_tokens,
-        n_max_segments=train_opt.n_max_segments,
-        input_size=512,
-        sum_loss=False,
-    )
-    ada_reranker = AdaptiveReranker(
+    ada_retriever = FeedbackQueryModifier(
         model_opt,
-        q_encoder=ada_encoder,
-        d_encoder=Contriever.from_pretrained("facebook/contriever-msmarco"),
-        n_max_candidates=train_opt.n_max_candidates,
-        do_contrastive=True
-    ).train()
-
-    # for n, p in ada_reranker.named_parameters():
-    #     if p.requires_grad:
-    #         logger.info(f"Optimized: {n}")
+        qr_encoder=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path
+        ),
+        qf_encoder=Contriever.from_pretrained(
+            model_opt.retriever_name_or_path, pooling='cls'
+        ).train(),
+    )
 
     # [Generator]
     ## Config & tokenizer
@@ -122,7 +112,8 @@ def main():
     from reinforce_trainer import Trainer
     trainer = Trainer(
         reward_model=reward_model,
-        model=ada_reranker,
+        index_dir=model_opt.faiss_index_dir,
+        model=ada_retriever,
         tokenizer=tokenizer_g,
         args=train_opt,
         train_dataset=train_dataset,
