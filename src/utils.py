@@ -1,9 +1,12 @@
 import torch.nn as nn
 import torch
+import numpy as np
 from transformers import GenerationConfig
 from prompts import asqa, qampari
+from transformers import AutoTokenizer
 from pyserini.search.lucene import LuceneSearcher
 from pyserini.search.faiss import FaissSearcher
+from _impact_searcher import LuceneImpactSearcher
 
 def init_generation_config(model_opt, tokenizer):
     stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
@@ -218,14 +221,17 @@ def multiple_sample_and_log_probability(
         else:
             return rankings
 
-def load_searcher(path, dense=False, sparse=False):
+def load_searcher(path, dense=False, lexical=False, sparse=False):
     if dense:
         searcher = FaissSearcher(path, 'facebook/contriever-msmarco')
+    elif lexical:
+        searcher = LuceneImpactSearcher(path, 'naver/splade-v3')
     elif sparse:
         searcher = LuceneSearcher(path)
         searcher.set_bm25(k1=0.9, b=0.4)
     else:
         searcher = None
+
     return searcher
 
 def get_expected_inputs(

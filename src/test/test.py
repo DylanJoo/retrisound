@@ -31,34 +31,40 @@ logger = logging.get_logger("transformers")
 
 def main():
 
-    from options import ModelOptions, DataOptions, PolicyTrainOptions
-    parser = HfArgumentParser((ModelOptions, DataOptions, PolicyTrainOptions))
+    from options import ModelOptions, DataOptions, ReinforceOptions
+    # from options import ModelOptions, DataOptions, RLTrainOptions
+    parser = HfArgumentParser((ModelOptions, DataOptions, ReinforceOptions))
     model_opt, data_opt, train_opt = parser.parse_args_into_dataclasses()
     set_seed(train_opt.seed)
 
     # [Retriever]
     ## Config & tokenizer
-    from modeling import Contriever, FeedbackQueryModifier, ValueCrossEncoder
+    from modeling import RMTEncoder, AdaptiveReranker, Contriever
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-    encoder = Contriever.from_pretrained(model_opt.retriever_name_or_path, pooling='cls').eval()
-    ada_retriever = FeedbackQueryModifier(
-        model_opt,
-        qr_encoder=encoder,
-        qf_encoder=Contriever.from_pretrained(model_opt.retriever_name_or_path, pooling='cls').train(),
-        fusion_type=model_opt.fusion_type,
-        zero_init=model_opt.zero_init
+    ada_encoder = RMTEncoder(
+        base_model=Contriever.from_pretrained(model_opt.retriever_name_or_path),
+        tokenizer=tokenizer_r,
+        num_mem_tokens=model_opt.num_mem_tokens,
+        n_max_segments=train_opt.n_max_segments,
+        input_size=512,
+        sum_loss=False,
     )
-
-    from transformers import BertForSequenceClassification
-    crossencoder = ValueCrossEncoder(
+    ada_reranker = AdaptiveReranker(
         model_opt,
-        cross_encoder=BertForSequenceClassification.from_pretrained(model_opt.retriever_name_or_path),
-        d_encoder=encoder,
+        q_encoder=ada_encoder,
+        d_encoder=Contriever.from_pretrained("facebook/contriever-msmarco"),
         n_max_candidates=train_opt.n_max_candidates,
+        do_contrastive=True
     ).train()
 
+    # for n, p in ada_reranker.named_parameters():
+    #     if p.requires_grad:
+    #         logger.info(f"Optimized: {n}")
+
     # [Generator]
+    ## Config & tokenizer
     from utils import update_tokenizer
+    from modeling import GenerativeRewardWrapper, Metric
     tokenizer_g = AutoTokenizer.from_pretrained(
         model_opt.generator_name_or_path, 
         padding_side='left',
@@ -73,21 +79,15 @@ def main():
         attn_implementation=model_opt.attn_implementation,
         torch_dtype=torch.bfloat16,
     ).eval()
+        # load_in_4bit=True
 
     # [RAG]
     generation_config = init_generation_config(model_opt, tokenizer_g)
 
-    from modeling import GenerativeRewardWrapper, Metric, Judgement
-    # reward_model = GenerativeRewardWrapper(
-    #     generator=llm, 
-    #     tokenizer=tokenizer_g, 
-    #     utility=Metric('rouge'),
-    #     generation_config=generation_config
-    # ).eval()
     reward_model = GenerativeRewardWrapper(
         generator=llm, 
         tokenizer=tokenizer_g, 
-        utility=Judgement([0, 1, 2]),
+        utility=Metric('rouge'),
         generation_config=generation_config
     ).eval()
 
@@ -97,16 +97,19 @@ def main():
         from data.qampari import ContextQADataset, ContextQACollator
     elif 'asqa' in train_opt.dataset_prefix:
         from data.asqa import ContextQADataset, ContextQACollator
+    else:
+        print(train_opt.dataset_prefix)
+        raise ValueError('no available dataset')
 
     train_dataset = ContextQADataset(
         data_file=data_opt.train_file, 
         n_max_segments=train_opt.n_max_segments,
         n_max_candidates=train_opt.n_max_candidates,
+        budget=model_opt.num_budget,
         depth=data_opt.depth,
         corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
-        quick_test=train_opt.quick_test,
-        half_with_bottom=train_opt.half_with_bottom
+        quick_test=train_opt.quick_test
     )
 
     ## data ollator
@@ -117,18 +120,18 @@ def main():
 
     # [trainer]
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from ppo_trainer import Trainer
+    from test_trainer import Trainer
     trainer = Trainer(
-        config=train_opt,
-        tokenizer=tokenizer_g,
-        policy=ada_retriever,
         reward_model=reward_model,
-        value_model=crossencoder,
+        index_dir=model_opt.faiss_index_dir,
+        model=ada_reranker,
+        tokenizer=tokenizer_g,
+        args=train_opt,
         train_dataset=train_dataset,
         data_collator=data_collator,
     )
     trainer.train()
-    trainer.save_model(train_opt.output_dir)
+    # trainer.save_model(train_opt.output_dir)
 
 if __name__ == '__main__':
     main()

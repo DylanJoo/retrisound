@@ -2,7 +2,7 @@
 #SBATCH --job-name=encode
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
-#SBATCH --mem=32G
+#SBATCH --mem=16G
 #SBATCH --nodes=1
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
@@ -17,8 +17,9 @@ cd ~/retrisound/src/
 RETRIEVER=naver/splade-v3
 
 # Generate embeddings
-for file in ${DATASET_DIR}/wikipedia_split/*jsonl*;do
-    echo Runing $file 
+# echo Runing $file 
+for num in $(seq 13280 21015);do
+    file=${DATASET_DIR}/wikipedia_split/psgs_w100.jsonl${num}
     python retrieval/mlm_encode.py \
         --model_name_or_path ${RETRIEVER} \
         --tokenizer_name ${RETRIEVER} \

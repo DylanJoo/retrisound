@@ -1,2 +1,2 @@
-from sparse import SparseAdaptiveEncoders
-from dense import AdaptiveEncoders
+from .sparse import SparseAdaptiveEncoders
+from .dense import DenseAdaptiveReranker

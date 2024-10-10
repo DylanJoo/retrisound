@@ -9,7 +9,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List, Mapping
 from transformers.modeling_outputs import BaseModelOutput
-from .dist_utils import gather
+# from .dist_utils import gather
 # from dist_utils import gather
 
 @dataclass
@@ -39,7 +39,7 @@ class RankingValueHead(nn.Module):
         output = self.fc_2(self.fc_1(output))
         return output
 
-class AdaptiveReranker(nn.Module):
+class DenseAdaptiveReranker(nn.Module):
 
     def __init__(
         self, 

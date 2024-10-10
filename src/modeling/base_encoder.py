@@ -9,6 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class SEOutput(BaseModelOutput):
     rep: torch.FloatTensor = None
+    logits: torch.FloatTensor = None
     last_hidden_state: torch.FloatTensor = None
 
 def normalize(tensor, eps=1e-9):
@@ -37,10 +38,6 @@ class SparseEncoder(nn.Module):
         output_attentions=None,
         output_hidden_states=None,
     ):
-        if special_tokens_mask is None:
-            special_tokens_mask = torch.zeros(
-                attention_mask.shape, device=input_ids.device
-            )
 
         model_output = self.model.forward(
             input_ids=input_ids,
@@ -56,7 +53,8 @@ class SparseEncoder(nn.Module):
         )
 
         last_hidden_state = model_output["hidden_states"][-1]
-        logits = model_output.logits * (1 - special_tokens_mask).unsqueeze(-1)
+        # logits = model_output.logits * (1 - special_tokens_mask).unsqueeze(-1)
+        logits = model_output.logits 
 
         # pooling/aggregation
         if self.agg == "sum":
@@ -74,7 +72,7 @@ class SparseEncoder(nn.Module):
         if self.norm:
             values = normalize(values)
 
-        return SEOutput(rep=values, last_hidden_state=last_hidden_state)
+        return SEOutput(rep=values, logits=logits, last_hidden_state=last_hidden_state)
 
 ## Learned dense encoder
 @dataclass
