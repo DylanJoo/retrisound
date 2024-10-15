@@ -10,7 +10,7 @@
 
 # Set-up the environment.
 source ${HOME}/.bashrc
-conda activate pyserini
+conda activate retrisound
 
 # Start the experiment.
 # Setups

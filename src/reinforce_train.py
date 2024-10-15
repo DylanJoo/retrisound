@@ -57,9 +57,7 @@ def main():
     )
 
     # [Generator]
-    ## Config & tokenizer
     from utils import update_tokenizer
-    from modeling import GenerativeRewardWrapper, Metric
     tokenizer_g = AutoTokenizer.from_pretrained(
         model_opt.generator_name_or_path, 
         padding_side='left',
@@ -72,12 +70,21 @@ def main():
         attn_implementation=model_opt.attn_implementation,
         torch_dtype=torch.bfloat16,
     ).eval()
+
+    # [RAG]
     generation_config = init_generation_config(model_opt, tokenizer_g)
 
+    from modeling import GenerativeRewardWrapper, Judgement
+    # reward_model = GenerativeRewardWrapper(
+    #     generator=llm, 
+    #     tokenizer=tokenizer_g, 
+    #     utility=Metric('rouge'),
+    #     generation_config=generation_config
+    # ).eval()
     reward_model = GenerativeRewardWrapper(
         generator=llm, 
         tokenizer=tokenizer_g, 
-        utility=Metric('rouge'),
+        utility=Judgement([0, 1, 2]),
         generation_config=generation_config
     ).eval()
 
@@ -87,19 +94,16 @@ def main():
         from data.qampari import ContextQADataset, ContextQACollator
     elif 'asqa' in train_opt.dataset_prefix:
         from data.asqa import ContextQADataset, ContextQACollator
-    else:
-        print(train_opt.dataset_prefix)
-        raise ValueError('no available dataset')
 
     train_dataset = ContextQADataset(
         data_file=data_opt.train_file, 
         n_max_segments=train_opt.n_max_segments,
         n_max_candidates=train_opt.n_max_candidates,
-        budget=model_opt.num_budget,
         depth=data_opt.depth,
         corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
-        quick_test=train_opt.quick_test
+        quick_test=train_opt.quick_test,
+        half_with_bottom=train_opt.half_with_bottom
     )
 
     ## data ollator
@@ -112,11 +116,11 @@ def main():
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
     from reinforce_trainer import Trainer
     trainer = Trainer(
+        args=train_opt,
         reward_model=reward_model,
-        index_dir=model_opt.faiss_index_dir,
+        index_dir=model_opt.lucene_index_dir,
         model=ada_retriever,
         tokenizer=tokenizer_g,
-        args=train_opt,
         train_dataset=train_dataset,
         data_collator=data_collator,
     )

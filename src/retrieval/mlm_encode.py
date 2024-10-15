@@ -65,7 +65,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", type=str)
     parser.add_argument("--tokenizer_name", type=str, default=None)
-    parser.add_argument("--collection", type=str)
+    parser.add_argument('-c', "--collection", type=str)
     parser.add_argument("--collection_output", type=str)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--max_length", type=int, default=256)

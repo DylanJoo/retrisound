@@ -10,12 +10,17 @@
 # Set-up the environment.
 source ${HOME}/.bashrc
 conda activate retrisound
+cd ~/retrisound/src/
 
 # Start the experiment.
+# Setups
+RETRIEVER=naver/splade-v3
+
+# Generate embeddings
 python -m pyserini.index.lucene \
   --collection JsonVectorCollection \
-  --input ${DATASET_DIR}/wikipedia_split/temp \
-  --index ${INDEX_DIR}/wikipedia_split/splade-v3.psgs_w100.full.lucene \
+  --input ${INDEX_DIR}/wikipedia_split/splade-v3.psgs_w100.encoded \
+  --index ${INDEX_DIR}/wikipedia_split/splade-v3.psgs_w100.lucene \
   --generator DefaultLuceneDocumentGenerator \
   --threads 36 \
   --impact --pretokenized

@@ -10,8 +10,6 @@ import numpy as np
 import scipy
 from tqdm import tqdm
 
-from pyserini.encode import QueryEncoder, CachedDataQueryEncoder, SlimQueryEncoder, SpladeQueryEncoder, \
-    TokFreqQueryEncoder, UniCoilQueryEncoder
 from pyserini.index.lucene import Document, IndexReader
 from pyserini.pyclass import autoclass, JFloat, JInt, JArrayList, JHashMap
 from pyserini.search.lucene import JScoredDoc
@@ -59,8 +57,8 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
             batch_logits = self.query_encoder(input_ids)['logits']
             batch_aggregated_logits, _ = torch.max(torch.log(1 + torch.relu(batch_logits))
                                                    * input_attention.unsqueeze(-1), dim=1)
+            batch_aggregated_logits = batch_aggregated_logits.cpu().detach().numpy() # done previously
 
-        batch_aggregated_logits = batch_aggregated_logits.cpu().detach().numpy()
         raw_weights = self._output_to_weight_dicts(batch_aggregated_logits)
         return self._get_encoded_query_token_wight_dicts(raw_weights)[0]
 
@@ -83,12 +81,12 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
             to_return.append(_weights)
         return to_return
 
-    def search(self, logits: torch.FloatTensor = None, k: int = 10, fields=dict()) -> List[JScoredDoc]:
+    def search(self, logit: torch.FloatTensor = None, k: int = 10, fields=dict()) -> List[JScoredDoc]:
         """Search the collection.
 
         Parameters
         ----------
-        v : torch.FloatTensor
+        logit : torch.FloatTensor
             Query sparse vector.
         k : int
             Number of hits to return.
@@ -107,7 +105,7 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
 
         if self.encoder_type == 'pytorch':
             jquery = JHashMap()
-            encoded_query = self.encode(text=None, batch_aggregated_logits=logits)
+            encoded_query = self.encode(text=None, batch_aggregated_logits=logit)
             for (token, weight) in encoded_query.items():
                 if token in self.idf and self.idf[token] > self.min_idf:
                     jquery.put(token, JInt(weight))
@@ -121,15 +119,17 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
 
         return hits
 
-    def batch_search(self, queries: List[str], qids: List[str],
+    def batch_search(self, 
+                     logits: torch.FloatTensor = None, 
+                     q_ids: List[str] = None,
                      k: int = 10, threads: int = 1, fields=dict()) -> Dict[str, List[JScoredDoc]]:
         """Search the collection concurrently for multiple queries, using multiple threads.
 
         Parameters
         ----------
-        queries : List[str]
-            List of query string.
-        qids : List[str]
+        logits: List[str]
+            List of query string/vector.
+        q_ids : List[str]
             List of corresponding query ids.
         k : int
             Number of hits to return.
@@ -141,15 +141,15 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         Returns
         -------
         Dict[str, List[JScoredDoc]]
-            Dictionary holding the search results, with the query ids as keys and the corresponding lists of search
-            results as the values.
+            Dictionary holding the search results, with the query ids as keys and 
+            the corresponding lists of search results as the values.
         """
         query_lst = JArrayList()
         qid_lst = JArrayList()
-        for q in queries:
+        for logit in logits:
             jquery = JHashMap()
             if self.encoder_type == 'pytorch':
-                encoded_query = self.encode(q)
+                encoded_query = self.encode(text=None, batch_aggregated_logits=logits)
                 for (token, weight) in encoded_query.items():
                     if token in self.idf and self.idf[token] > self.min_idf:
                         jquery.put(token, JInt(weight))
@@ -157,7 +157,7 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
                 jquery = q
             query_lst.add(jquery)
 
-        for qid in qids:
+        for qid in q_ids:
             jqid = qid
             qid_lst.add(jqid)
 
@@ -173,20 +173,6 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         else:
             results = self.object.batch_search_fields(query_lst, qid_lst, int(k), int(threads), jfields)
         return {r.getKey(): r.getValue() for r in results.entrySet().toArray()}
-
-    def set_analyzer(self, analyzer):
-        """Set the Java ``Analyzer`` to use.
-
-        Parameters
-        ----------
-        analyzer : JAnalyzer
-            Java ``Analyzer`` object.
-        """
-        self.object.set_analyzer(analyzer)
-
-    def set_language(self, language):
-        """Set language of LuceneSearcher."""
-        self.object.set_language(language)
 
     def doc(self, docid: Union[str, int]) -> Optional[Document]:
         """Return the :class:`Document` corresponding to ``docid``. The ``docid`` is overloaded: if it is of type
@@ -208,96 +194,6 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         if lucene_document is None:
             return None
         return Document(lucene_document)
-
-    def set_rm3(self):
-        self.object.set_rm3()
-
-    def set_rm3(self, fb_terms=10, fb_docs=10, original_query_weight=float(0.5), debug=False, filter_terms=True):
-        """Configure RM3 pseudo-relevance feedback.
-
-        Parameters
-        ----------
-        fb_terms : int
-            RM3 parameter for number of expansion terms.
-        fb_docs : int
-            RM3 parameter for number of expansion documents.
-        original_query_weight : float
-            RM3 parameter for weight to assign to the original query.
-        debug : bool
-            Print the original and expanded queries as debug output.
-        filter_terms: bool
-            Whether to remove non-English terms.
-        """
-        if self.object.reader.getTermVectors(0):
-            self.object.set_rm3(None, fb_terms, fb_docs, original_query_weight, debug, filter_terms)
-        elif self.object.reader.document(0).getField('raw'):
-            self.object.set_rm3('JsonVectorCollection', fb_terms, fb_docs, original_query_weight, debug, filter_terms)
-        elif self.prebuilt_index_name in ['msmarco-v1-passage', 'msmarco-v1-doc', 'msmarco-v1-doc-segmented']:
-            self.object.set_rm3('JsonCollection', fb_terms, fb_docs, original_query_weight, debug, filter_terms)
-        elif self.prebuilt_index_name in ['msmarco-v2-passage', 'msmarco-v2-passage-augmented']:
-            self.object.set_rm3('MsMarcoV2PassageCollection', fb_terms, fb_docs, original_query_weight, debug, filter_terms)
-        elif self.prebuilt_index_name in ['msmarco-v2-doc', 'msmarco-v2-doc-segmented']:
-            self.object.set_rm3('MsMarcoV2DocCollection', fb_terms, fb_docs, original_query_weight, debug, filter_terms)
-        else:
-            raise TypeError("RM3 is not supported for indexes without document vectors or raw texts.")
-
-    def unset_rm3(self):
-        """Disable RM3 pseudo-relevance feedback."""
-        self.object.unset_rm3()
-
-    def is_using_rm3(self) -> bool:
-        """Check if RM3 pseudo-relevance feedback is being performed."""
-        return self.object.use_rm3()
-
-    def set_rocchio(self):
-        self.object.set_rocchio()
-
-    def set_rocchio(self, top_fb_terms=10, top_fb_docs=10, bottom_fb_terms=10, bottom_fb_docs=10,
-                    alpha=1, beta=0.75, gamma=0, debug=False, use_negative=False):
-        """Configure Rocchio pseudo-relevance feedback.
-
-        Parameters
-        ----------
-        top_fb_terms : int
-            Rocchio parameter for number of relevant expansion terms.
-        top_fb_docs : int
-            Rocchio parameter for number of relevant expansion documents.
-        bottom_fb_terms : int
-            Rocchio parameter for number of non-relevant expansion terms.
-        bottom_fb_docs : int
-            Rocchio parameter for number of non-relevant expansion documents.
-        alpha : float
-            Rocchio parameter for weight to assign to the original query.
-        beta: float
-            Rocchio parameter for weight to assign to the relevant document vector.
-        gamma: float
-            Rocchio parameter for weight to assign to the nonrelevant document vector.
-        debug : bool
-            Print the original and expanded queries as debug output.
-        use_negative : bool
-            Rocchio parameter to use negative labels.
-        """
-        if self.object.reader.getTermVectors(0):
-            self.object.set_rocchio(None, top_fb_terms, top_fb_docs, bottom_fb_terms, bottom_fb_docs,
-                                    alpha, beta, gamma, debug, use_negative)
-        elif self.object.reader.document(0).getField('raw'):
-            self.object.set_rocchio('JsonVectorCollection', top_fb_terms, top_fb_docs, bottom_fb_terms, bottom_fb_docs,
-                                    alpha, beta, gamma, debug, use_negative)
-        elif self.prebuilt_index_name in ['msmarco-v1-passage', 'msmarco-v1-doc', 'msmarco-v1-doc-segmented']:
-            self.object.set_rocchio('JsonCollection', top_fb_terms, top_fb_docs, bottom_fb_terms, bottom_fb_docs,
-                                    alpha, beta, gamma, debug, use_negative)
-        # Note, we don't have any Pyserini 2CRs that use Rocchio for MS MARCO v2, so there's currently no
-        # corresponding code branch here. To avoid introducing bugs (without 2CR tests), we'll add when it's needed.
-        else:
-            raise TypeError("Rocchio is not supported for indexes without document vectors or raw texts.")
-
-    def unset_rocchio(self):
-        """Disable Rocchio pseudo-relevance feedback."""
-        self.object.unset_rocchio()
-
-    def is_using_rocchio(self) -> bool:
-        """Check if Rocchio pseudo-relevance feedback is being performed."""
-        return self.object.use_rocchio()
 
     def doc_by_field(self, field: str, q: str) -> Optional[Document]:
         """Return the :class:`Document` based on a ``field`` with ``id``. For example, this method can be used to fetch
@@ -325,118 +221,3 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         """Close the searcher."""
         self.object.close()
 
-    @staticmethod
-    def _init_query_encoder_from_str(query_encoder):
-        if query_encoder is None:
-            return TokFreqQueryEncoder()
-        elif os.path.isfile(query_encoder) and (query_encoder.endswith('jsonl') or query_encoder.encode('json')):
-            return CachedDataQueryEncoder(query_encoder)
-        elif 'unicoil' in query_encoder.lower():
-            return UniCoilQueryEncoder(query_encoder)
-        elif 'splade' in query_encoder.lower():
-            return SpladeQueryEncoder(query_encoder)
-        elif 'slim' in query_encoder.lower():
-            return SlimQueryEncoder(query_encoder)
-
-    @staticmethod
-    def _compute_idf(index_path):
-        index_reader = IndexReader(index_path)
-        tokens = []
-        dfs = []
-        for term in index_reader.terms():
-            dfs.append(term.df)
-            tokens.append(term.term)
-        idfs = np.log((index_reader.stats()['documents'] / (np.array(dfs))))
-        return dict(zip(tokens, idfs))
-
-
-SlimResult = namedtuple("SlimResult", "docid score")
-
-
-def maxsim(entry):
-    q_embed, d_embeds, d_lens, qid, scores, docids = entry
-    if len(d_embeds) == 0:
-        return qid, scores, docids
-    d_embeds = scipy.sparse.vstack(d_embeds).transpose() # (LD x 1000) x D
-    max_scores = (q_embed@d_embeds).todense() # LQ x (LD x 1000)
-    scores = []
-    start = 0
-    for d_len in d_lens:
-        scores.append(max_scores[:, start:start+d_len].max(1).sum())
-        start += d_len
-    scores, docids = list(zip(*sorted(list(zip(scores, docids)), key=lambda x: -x[0])))
-    return qid, scores, docids
-
-
-class SlimSearcher(LuceneImpactSearcher):
-    def __init__(self, encoded_corpus, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        print("Loading sparse corpus vectors for fast reranking...")
-        with open(os.path.join(encoded_corpus, "sparse_range.pkl"), "rb") as f:
-            self.sparse_ranges = pickle.load(f)
-        sparse_vecs = scipy.sparse.load_npz(os.path.join(encoded_corpus, "sparse_vec.npz"))
-        self.sparse_vecs = [sparse_vecs[start:end] for start, end in tqdm(self.sparse_ranges)]
-    
-    @classmethod
-    def from_prebuilt_index(cls, encoded_corpus:str, prebuilt_index_name: str, query_encoder: Union[QueryEncoder, str], min_idf=0):
-        print(f'Attempting to initialize pre-built index {prebuilt_index_name}.')
-        try:
-            index_dir = download_prebuilt_index(prebuilt_index_name)
-            encoded_corpus = download_encoded_corpus(encoded_corpus)
-        except ValueError as e:
-            print(str(e))
-            return None
-
-        print(f'Initializing {prebuilt_index_name}...')
-        return cls(encoded_corpus, index_dir, query_encoder, min_idf)
-
-    def search(self, q: str, k: int = 10, fields=dict()) -> List[JScoredDoc]:
-        jfields = JHashMap()
-        for (field, boost) in fields.items():
-            jfields.put(field, JFloat(boost))
-
-        fusion_encoded_query, sparse_encoded_query = self.query_encoder.encode(q, return_sparse=True)
-        jquery = JHashMap()
-        for (token, weight) in fusion_encoded_query.items():
-            if token in self.idf and self.idf[token] > self.min_idf:
-                jquery.put(token, JInt(weight))
-
-        if self.sparse_vecs is not None:
-            search_k = k * (self.min_idf + 1)
-        if not fields:
-            hits = self.object.search(jquery, search_k)
-        else:
-            hits = self.object.searchFields(jquery, jfields, search_k)
-        hits = self.fast_rerank([sparse_encoded_query], {0: hits}, k)[0]
-        return hits
-    
-    def batch_search(self, queries: List[str], qids: List[str],
-                     k: int = 10, threads: int = 1, fields=dict()) -> Dict[str, List[JScoredDoc]]:
-        query_lst = JArrayList()
-        qid_lst = JArrayList()
-        sparse_encoded_queries = {}
-        for qid, q in zip(qids, queries):
-            fusion_encoded_query, sparse_encoded_query = self.query_encoder.encode(q, return_sparse=True)
-            jquery = JHashMap()
-            for (token, weight) in fusion_encoded_query.items():
-                if token in self.idf and self.idf[token] > self.min_idf:
-                    jquery.put(token, JInt(weight))
-            query_lst.add(jquery)
-            sparse_encoded_queries[qid] = sparse_encoded_query
-
-        for qid in qids:
-            jqid = qid
-            qid_lst.add(jqid)
-
-        jfields = JHashMap()
-        for (field, boost) in fields.items():
-            jfields.put(field, JFloat(boost))
-        
-        if not fields:
-            results = self.object.batch_search(query_lst, qid_lst, k * (self.min_idf + 1), threads)
-        else:
-            results = self.object.batch_search_fields(query_lst, qid_lst, k * (self.min_idf + 1), threads, jfields)
-        
-        results = {r.getKey(): r.getValue() for r in results.entrySet().toArray()}
-        results = self.fast_rerank(sparse_encoded_queries, results, k)
-        return results

@@ -7,6 +7,7 @@ class ModelOptions:
     retriever_name_or_path: Optional[str] = field(default="")
     generator_name_or_path: Optional[str] = field(default="")
     faiss_index_dir: Optional[str] = field(default="")
+    lucene_index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
     n_negative_samples: Optional[int] = field(default=0)
     fixed_d_encoder: Optional[bool] = field(default=False)
@@ -48,6 +49,7 @@ class ReinforceOptions(RewardConfig):
     report_to: Optional[str] = field(default="wandb")
     cont_coef: Optional[float] = field(default=0.0)
     rl_coef: Optional[float] = field(default=1.0)
+    half_with_bottom: bool = field(default=False)
 
 from trl.trainer.ppov2_config import PPOv2Config
 @dataclass

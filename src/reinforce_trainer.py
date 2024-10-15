@@ -45,7 +45,7 @@ class Trainer(RewardTrainer):
     def __init__(self, reward_model, index_dir=None, **kwargs):
         super().__init__(**kwargs)
         self.reward_model = reward_model
-        self.searcher = load_searcher(index_dir, dense=True)
+        self.searcher = load_searcher(index_dir, lexical=True)
         self._move_model_to_device(self.reward_model, self.args.device)
 
     def compute_loss(
@@ -57,12 +57,14 @@ class Trainer(RewardTrainer):
 
         ## collect inputs 
         ### [RL states]: question, candidates, feedback
-        bm25_candidates = inputs["candidates"]
+        candidates = bm25_candidates = inputs["candidates"]
         questions = inputs["questions"]
         targets = inputs["targets"]
         data_indices = inputs["index"] # for the next iteration
 
         ### sampling
+        logprobs = []
+        rewards = []
         for t in range(0, self.args.num_steps + 1):
             if t == 0:
                 retriever_inputs = inputs["inputs_for_retriever"]
@@ -76,16 +78,18 @@ class Trainer(RewardTrainer):
                 )
 
             outputs = model(**retriever_inputs, include_n_feedbacks=t+1)
-            queries = outputs.qembs[:, -1, :] # the last reformulated qemb
+            queries = outputs.q_reps[:, -1, :] # the last reformulated qemb
+            logprob = outputs.q_logprobs[:, -1]
+            print('actions', outputs.q_action_masks.sum(-1))
 
             ### re-ranking without prepare contexts (deprecated)
             ### retrieval and prepare contexts
             hits = self.searcher.batch_search(
                 queries.float().detach().cpu().numpy(), 
-                q_ids=list(range(queries.size()[0])), 
+                q_ids=[str(i) for i in range(queries.size()[0])],
                 k=len(candidates[0])
             )
-            candidates = [] 
+            # candidates = [] 
             for i, key in enumerate(hits):
                 candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
                 candidates.append( candidate )
@@ -98,7 +102,8 @@ class Trainer(RewardTrainer):
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
                 rankings=None,
-                dataset_prefix=self.args.dataset_prefix
+                dataset_prefix=self.args.dataset_prefix,
+                answers=targets
             )
             response = []
             for i in range(0, len(prompt), gen_batch):
@@ -109,7 +114,6 @@ class Trainer(RewardTrainer):
             ### (2) feedback 
             prompt = augmentation_feedback(
                 questions=questions, 
-                answers=response,
                 candidates=candidates, 
                 n_context=self.args.n_contexts,
                 rankings=None,
@@ -118,21 +122,28 @@ class Trainer(RewardTrainer):
             feedback = []
             for i in range(0, len(prompt), gen_batch):
                 _, _, b_feedback = self.reward_model._inference(prompt[i:i+gen_batch])
+                b_feedback = [f.rsplit('</f>', 1)[0] for f in b_feedback]
                 feedback += b_feedback
 
             for i in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[i], feedback[i])
 
             ### calculate rewards (on policy)
-            reward = self.reward_model.get_rewards(response, targets).view(-1, 1)
+            reward = self.reward_model.get_rewards(response, targets).view(-1)
             reward = reward.to(model.device)
 
             if t == 0:
-                baseline = reward # first reward as baseline
+                # baseline = reward # first reward as baseline
+                baseline = 0 # first reward as baseline
 
+            rewards.append(reward)
+            logprobs.append(logprob)
+
+        rewards = torch.stack(rewards, 1)
+        logprobs = torch.stack(logprobs, 1)
         ## baseline can be the improved one-shot retrieval
-        logprob = -1
-        reinforce_loss = ((reward - baseline) * (-logprob)).mean()
+        # logprob = -1
+        reinforce_loss = ((rewards - baseline) * (-logprobs)).mean()
         contrastive_loss = outputs.loss
 
         loss = (reinforce_loss * self.args.rl_coef) + \
@@ -142,7 +153,6 @@ class Trainer(RewardTrainer):
         self.log({"loss/RL": reinforce_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
 
-        print('\nprompt: ', prompt[0])
         print('\nquestion: ', questions[0])
         print('\nresponse: ', response[0])
         print('\nfeedback: ', feedback[0])

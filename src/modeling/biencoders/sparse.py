@@ -19,11 +19,17 @@ class RegularizationHead(nn.Module):
     def forward(self, input_ids, attention_mask):
         logits = self.encoder(input_ids, attention_mask).logits
         values = torch.sigmoid(logits[:, 0, :])
-        return values
+
+        dist = torch.distributions.Bernoulli(values)
+        actions = dist.sample()
+        logprobs = dist.log_prob(actions).sum(-1) # B V --> B V
+        return values, logprobs, actions.sum(-1)
 
 @dataclass
 class EncodersOutput(BaseModelOutput):
     q_reps: torch.FloatTensor = None
+    q_logprobs: torch.FloatTensor = None
+    q_action_masks: torch.FloatTensor = None
     d_reps: torch.FloatTensor = None
     loss: torch.FloatTensor = None
     scores: Optional[torch.FloatTensor] = None
@@ -62,16 +68,23 @@ class SparseAdaptiveEncoders(nn.Module):
         batch_size = q_tokens[0].size(0)
 
         # encode query request and query feedback
+        q_logprobs = []
         q_reps = []
+        q_action_masks = []
         for i in range(max_num_steps):
             if i == 0:
                 q_rep = self.q_encoder(q_tokens[0], q_masks[0]).rep
+                q_action, q_logprob, q_action_mask = self.modifier(q_tokens[0], q_masks[0]) 
             else:
-                # print(q_masks[i])
-                q_transform = self.modifier(q_tokens[i], q_masks[i]) 
-                q_rep = q_reps[-1] * q_transform
+                q_action, q_logprob, q_action_mask = self.modifier(q_tokens[i], q_masks[i]) 
+                q_rep = q_reps[0] * q_action
             q_reps.append(q_rep)
-        q_reps = torch.stack(q_reps, dim=1) # B N_seg H
+            q_action_masks.append(q_action)
+            q_logprobs.append(q_logprob)
+
+        q_reps = torch.stack(q_reps, dim=1) # B N_seg V
+        q_action_masks = torch.stack(q_action_masks, dim=1) # B N_seg
+        q_logprobs = torch.stack(q_logprobs, dim=1) # B N_seg
 
         # loss calculation
         scores, loss_r = None, 0.0
@@ -92,6 +105,8 @@ class SparseAdaptiveEncoders(nn.Module):
 
         return EncodersOutput(
             q_reps=q_reps,
+            q_logprobs=q_logprobs,
+            q_action_masks=q_action_masks,
             d_reps=d_reps,
             loss=loss_r,
             scores=scores, 

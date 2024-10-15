@@ -1,8 +1,8 @@
 #!/bin/sh
-#SBATCH --job-name=adarag
+#SBATCH --job-name=5hr-adarag
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_rtx_a6000:2
-#SBATCH --mem=96G
+#SBATCH --gres=gpu:nvidia_rtx_a6000:1
+#SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
@@ -20,15 +20,13 @@ data_dir=${HOME}/datasets/asqa
 
 # Setups
 NUM_GPUS=1
-BATCH_SIZE_PER_GPU=4
-TOTAL_BATCH_SIZE=4
+BATCH_SIZE_PER_GPU=8
+TOTAL_BATCH_SIZE=8
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
-
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
-BASE_RET=facebook/contriever-msmarco
-
-MODEL_SIZE=8B
-BASE_LLM=meta-llama/Meta-Llama-3.1-8B
+BASE_RET=naver/splade-v3
+MODEL_SIZE=1B
+BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
 echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
@@ -61,9 +59,9 @@ accelerate launch \
     --n_max_segments 5 \
     --n_max_candidates 5 \
     --num_steps 5 \
-    --cont_coef 1.0 \
+    --cont_coef 0.0 \
     --rl_coef 1.0 \
     --bf16 true \
-    --faiss_index_dir /home/dju/indexes/wikipedia_split/contriever.psgs_w100.faissfull \
+    --lucene_index_dir /home/dju/indexes/wikipedia_split/splade-v3.psgs_w100.lucene \
     --logging_steps 1
 

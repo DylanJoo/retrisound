@@ -38,7 +38,9 @@ def main():
 
     # [Retriever]
     ## Config & tokenizer
-    from modeling import Contriever, FeedbackQueryModifier, ValueCrossEncoder
+    from modeling import Contriever
+    from modeling import FeedbackQueryModifier
+    from modeling import ValueCrossEncoder
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     encoder = Contriever.from_pretrained(model_opt.retriever_name_or_path, pooling='cls').eval()
     ada_retriever = FeedbackQueryModifier(
@@ -65,11 +67,9 @@ def main():
         use_fast=True
     )
     tokenizer_g = update_tokenizer(tokenizer_g)
-    config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
-
     llm = AutoModelForCausalLM.from_pretrained(
         model_opt.generator_name_or_path,
-        config=config,
+        config=AutoConfig.from_pretrained(model_opt.generator_name_or_path),
         attn_implementation=model_opt.attn_implementation,
         torch_dtype=torch.bfloat16,
     ).eval()
@@ -77,7 +77,7 @@ def main():
     # [RAG]
     generation_config = init_generation_config(model_opt, tokenizer_g)
 
-    from modeling import GenerativeRewardWrapper, Metric, Judgement
+    from modeling import GenerativeRewardWrapper, Judgement
     # reward_model = GenerativeRewardWrapper(
     #     generator=llm, 
     #     tokenizer=tokenizer_g, 
@@ -128,7 +128,7 @@ def main():
         data_collator=data_collator,
     )
     trainer.train()
-    trainer.save_model(train_opt.output_dir)
+    # trainer.save_model(train_opt.output_dir)
 
 if __name__ == '__main__':
     main()

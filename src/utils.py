@@ -54,7 +54,7 @@ def augmentation_response(
             reranked_context = [candidates[i][j] for j in rankings[i]]
             contexts.append(reranked_context[:n_context])
     else:
-        contexts = candidates[:n_context]
+        contexts = [clist[:n_context] for clist in candidates] 
 
     ## loading dependencies
     if 'asqa' in dataset_prefix:
@@ -98,7 +98,7 @@ def augmentation_feedback(
             reranked_context = [candidates[i][j] for j in rankings[i]]
             contexts.append(reranked_context[:n_context])
     else:
-        contexts = candidates[:n_context]
+        contexts = [clist[:n_context] for clist in candidates] 
 
     ## loading dependencies
     if 'asqa' in dataset_prefix:
@@ -121,8 +121,9 @@ def augmentation_feedback(
             Q=questions[i], 
             D=D,
             instruction=fbk_instruction_prompt,
-            prefix='Follow-up query:\n<q>'
+            prefix='Feedback:\n<f>'
         )
+            # prefix='Follow-up query:\n<q>'
         prompts.append(prompt)
 
     return prompts
@@ -222,16 +223,14 @@ def multiple_sample_and_log_probability(
             return rankings
 
 def load_searcher(path, dense=False, lexical=False, sparse=False):
+    searcher = None
     if dense:
         searcher = FaissSearcher(path, 'facebook/contriever-msmarco')
-    elif lexical:
+    if lexical:
         searcher = LuceneImpactSearcher(path, 'naver/splade-v3')
-    elif sparse:
+    if sparse:
         searcher = LuceneSearcher(path)
         searcher.set_bm25(k1=0.9, b=0.4)
-    else:
-        searcher = None
-
     return searcher
 
 def get_expected_inputs(
