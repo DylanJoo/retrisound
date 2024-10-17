@@ -58,6 +58,7 @@ class Trainer(RewardTrainer):
         ## collect inputs 
         ### [RL states]: question, candidates, feedback
         candidates = bm25_candidates = inputs["candidates"]
+        candidate_pids = inputs["candidate_pids"]
         questions = inputs["questions"]
         targets = inputs["targets"]
         data_indices = inputs["index"] # for the next iteration
@@ -76,11 +77,12 @@ class Trainer(RewardTrainer):
                     [self.train_dataset[idx] for idx in data_indices],
                     device=model.device
                 )
+                candidates = [self.train_dataset[idx]['candidates'] for idx in data_indices]
+                candidate_pids = [self.train_dataset[idx]['candidate_pids'] for idx in data_indices]
 
             outputs = model(**retriever_inputs, include_n_feedbacks=t+1)
-            queries = outputs.q_reps[:, -1, :] # the last reformulated qemb
+            queries = outputs.q_reps[:, -1] # the last reformulated qemb
             logprob = outputs.q_logprobs[:, -1]
-            print('actions', outputs.q_action_masks.sum(-1))
 
             ### re-ranking without prepare contexts (deprecated)
             ### retrieval and prepare contexts
@@ -89,17 +91,21 @@ class Trainer(RewardTrainer):
                 q_ids=[str(i) for i in range(queries.size()[0])],
                 k=len(candidates[0])
             )
-            # candidates = [] 
+            candidates_ = []
+            candidate_pids_ = []
             for i, key in enumerate(hits):
-                candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
-                candidates.append( candidate )
+                new_docids = [h.docid for h in hits[key] if h.docid not in candidate_pids[i]]
+                candidate_pids_.append(new_docids)
+
+                new_docs = [self.train_dataset.corpus[docid] for docid in new_docids]
+                candidates_.append( new_docs )
 
             ### generation
             gen_batch = (1 or self.args.generation_batch)
             ### (1) response
             prompt = augmentation_response(
                 questions=questions, 
-                candidates=candidates, 
+                candidates=candidates_, 
                 n_context=self.args.n_contexts,
                 rankings=None,
                 dataset_prefix=self.args.dataset_prefix,
@@ -108,13 +114,13 @@ class Trainer(RewardTrainer):
             response = []
             for i in range(0, len(prompt), gen_batch):
                 _, _, b_response = self.reward_model._inference(prompt[i:i+gen_batch])
-                b_response = [r.rsplit('Question', 1)[0] for r in b_response]
+                b_response = [r.rsplit('</r>', 1)[0] for r in b_response]
                 response += b_response
 
             ### (2) feedback 
             prompt = augmentation_feedback(
                 questions=questions, 
-                candidates=candidates, 
+                candidates=candidates_, 
                 n_context=self.args.n_contexts,
                 rankings=None,
                 dataset_prefix=self.args.dataset_prefix
@@ -127,22 +133,20 @@ class Trainer(RewardTrainer):
 
             for i in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[i], feedback[i])
+                self.train_dataset.update_candidates(data_indices[i], candidate_pids_[i])
 
             ### calculate rewards (on policy)
             reward = self.reward_model.get_rewards(response, targets).view(-1)
             reward = reward.to(model.device)
-
-            if t == 0:
-                # baseline = reward # first reward as baseline
-                baseline = 0 # first reward as baseline
-
             rewards.append(reward)
             logprobs.append(logprob)
 
         rewards = torch.stack(rewards, 1)
         logprobs = torch.stack(logprobs, 1)
+        # baseline = rewards[:, 0].view(-1, 1)
+        baseline = 0
+
         ## baseline can be the improved one-shot retrieval
-        # logprob = -1
         reinforce_loss = ((rewards - baseline) * (-logprobs)).mean()
         contrastive_loss = outputs.loss
 
@@ -153,9 +157,18 @@ class Trainer(RewardTrainer):
         self.log({"loss/RL": reinforce_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
 
+        print('---')
         print('\nquestion: ', questions[0])
+        # print('\nAction value', \
+        #         self.tokenizer.batch_decode(torch.argsort(outputs.q_values[0], -1, descending=True)[:, :8]))
+        print('\nNext query value', \
+                self.tokenizer.batch_decode(torch.argsort(outputs.q_reps[0], -1, descending=True)[:, :8]))
+        print('\ncandidate titles: ', [c['title'] for c in candidates[0]])
+        print('\nanswer: ', targets[0])
         print('\nresponse: ', response[0])
         print('\nfeedback: ', feedback[0])
+        print('\nrewards: ', rewards[0])
+        print('---')
 
         ## logging
         if self.accelerator.is_main_process:

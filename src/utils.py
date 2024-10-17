@@ -64,8 +64,8 @@ def augmentation_response(
 
     if 'qampari' in dataset_prefix:
         apply_docs_prompt = qampari.apply_docs_prompt
-        apply_rsp_inst_prompt = qampari.apply_rsp_inst_prompt
-        instruction_prompt = qampari.instruction_prompt
+        apply_rsp_inst_prompt = qampari.apply_rsp_inst_prompt_new
+        instruction_prompt = qampari.instruction_prompt_new
 
     # prepare prompts
     prompts = []

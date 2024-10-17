@@ -61,7 +61,7 @@ class ContextQADataset(Dataset):
 
         ## dynamic attributes
         # self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
-        self.feedbacks = [ ["" for _ in range(self.n_max_segments)]  for _ in range(self.length)]
+        self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
         self._build(data)
 
         ## results for context candidates
@@ -157,9 +157,7 @@ class ContextQACollator(DefaultDataCollator):
     truncation: Union[bool, str] = True
     padding: Union[bool, str, PaddingStrategy] = 'longest'
     max_src_length: Union[int] = 256
-    max_tgt_length: Union[int] = 16
     pad_to_multiple_of: Optional[int] = None
-    num_mem_tokens: Union[int] = 16
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         """

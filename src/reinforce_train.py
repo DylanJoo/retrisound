@@ -48,12 +48,12 @@ def main():
         encoder=SparseEncoder(
             model_name_or_path=model_opt.retriever_name_or_path,
             output='MLM', agg='max', activation='relu'
-        ).train()
+        )
     )
     ada_retriever = SparseAdaptiveEncoders(
         model_opt,
         encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path).eval(),
-        modifier=modifier
+        modifier=modifier.train()
     )
 
     # [Generator]
@@ -84,7 +84,7 @@ def main():
     reward_model = GenerativeRewardWrapper(
         generator=llm, 
         tokenizer=tokenizer_g, 
-        utility=Judgement([0, 1, 2]),
+        utility=Judgement(list(range(train_opt.n_max_candidates+1))),
         generation_config=generation_config
     ).eval()
 
@@ -120,7 +120,7 @@ def main():
         reward_model=reward_model,
         index_dir=model_opt.lucene_index_dir,
         model=ada_retriever,
-        tokenizer=tokenizer_g,
+        tokenizer=tokenizer_r,
         train_dataset=train_dataset,
         data_collator=data_collator,
     )

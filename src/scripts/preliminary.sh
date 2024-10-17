@@ -37,18 +37,17 @@ accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
-    --main_process_port 29501 \
     --deepspeed_config_file configs/zero2_config_accelerate.json \
     reinforce_train.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --attn_implementation flash_attention_2 \
-    --train_file /home/dju/datasets/asqa/ASQA.json \
-    --corpus_file /home/dju/datasets/wikipedia_split/ \
-    --retrieval_file /home/dju/datasets/asqa/train_data_bm25-top100.run \
+	--train_file /home/dju/datasets/asqa/ASQA.json \
+	--corpus_file /home/dju/datasets/wikipedia_split/ \
+	--retrieval_file /home/dju/datasets/asqa/train_data_bm25-top100.run \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 6e-5 \
+    --learning_rate 5e-5 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
@@ -56,22 +55,13 @@ accelerate launch \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 2 \
-    --n_contexts 10 \
-    --n_max_segments 3 \
-    --n_max_candidates 10 \
-    --num_steps 3 \
+    --n_contexts 5 \
+    --n_max_segments 5 \
+    --n_max_candidates 5 \
+    --num_steps 1 \
     --cont_coef 0.0 \
     --rl_coef 1.0 \
     --bf16 true \
     --lucene_index_dir /home/dju/indexes/wikipedia_split/splade-v3.psgs_w100.lucene \
     --logging_steps 1
 
-# --train_file /home/dju/datasets/qampari/train_data.jsonl \
-# --retrieval_file /home/dju/datasets/qampari/train_data_bm25-top100.run \
-
-# --train_file /home/dju/datasets/asqa/ASQA.json \
-# --corpus_file /home/dju/datasets/wikipedia_split/ \
-# --retrieval_file /home/dju/datasets/asqa/train_data_bm25-top100.run \
-
-# Should use original wiki which is indexed.
-# --corpus_file /home/dju/datasets/qampari/wikipedia_chunks/chunks_v5 \
