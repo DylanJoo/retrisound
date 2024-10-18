@@ -10,6 +10,30 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List, Mapping
 from transformers.modeling_outputs import BaseModelOutput
 from transformers import PreTrainedModel, AutoTokenizer
+from modeling.utils import SubsetOperator
+
+class SelectionHead(nn.Module):
+    def __init__(self, opt, encoder):
+        super().__init__()
+        self.encoder = encoder
+        self.gumbel_topk = SubsetOperator(k=1000, hard=True)
+
+    def forward(self, input_ids, attention_mask, query_rep=None):
+        logits = self.encoder(input_ids, attention_mask).logits
+
+        # regression
+        values = torch.sigmoid(logits.max(1).values) 
+
+        # Gumbel top-k
+        logprobs = F.log_softmax(logits, dim=-1)
+        actions = self.gumbel_topk(logits) # B V
+        logprobs = all_logprobs * actions # B V
+
+        # monte-carlo
+        # dist = torch.distributions.bernoulli(values) 
+        # actions = dist.sample()
+        # logprobs = dist.log_prob(actions)
+        return values, logprobs, actions
 
 class RegularizationHead(nn.Module):
     def __init__(self, opt, encoder):
@@ -17,23 +41,38 @@ class RegularizationHead(nn.Module):
         self.encoder = encoder
 
     def forward(self, input_ids, attention_mask, query_rep=None):
-        logits = self.encoder(input_ids, attention_mask).logits
-
-        # cls token
-        # values = torch.sigmoid(logits[:, 0, :]) # B V
+        reps = self.encoder(input_ids, attention_mask).reps
 
         # regression
-        values = torch.sigmoid(logits.max(1).values) # aggregate at sequence dim
-        values = values * (logits.max(1).values > 0)
+        # values = torch.sigmoid(logits.max(1).values) # aggregate at sequence dim
 
-        if query_rep is not None:
-            values = values * (query_rep != 0)
-
-        dist = torch.distributions.Bernoulli(values) 
-        actions = dist.sample()
-        # logprobs = dist.log_prob(actions).sum(-1) # B V --> B
-        logprobs = dist.log_prob(actions)
+        # monte-carlo
+        # dist = torch.distributions.bernoulli(values) 
+        # actions = dist.sample()
+        # logprobs = dist.log_prob(actions)
         return values, logprobs, actions
+
+class AnsweringHead(nn.Module):
+    def __init__(self, opt, encoder):
+        super().__init__()
+        self.encoder = encoder
+        self.gumbel_topk = SubsetOperator(k=1000, hard=True)
+
+    def forward(self, input_ids, attention_mask, query_rep=None):
+        reps = self.encoder(input_ids, attention_mask).reps
+        all_logprobs = F.log_softmax(reps, dim=-1)             # B L V
+        selections = self.gumbel_topk(reps, hard=True, dim=-1) # B L V
+        logprobs = (all_logprobs * selections).sum(1)          # B V
+
+        actions = reps
+
+        return values, logprobs, actions
+        # logits = self.encoder(input_ids, attention_mask).logits
+        # values = torch.sigmoid(logits.max(1).values) 
+        # logprobs = F.log_softmax(logits, dim=-1)
+        # actions = self.gumbel_topk(logits) # B V
+        # logprobs = all_logprobs * actions # B V
+        # return values, logprobs, actions
 
 @dataclass
 class EncodersOutput(BaseModelOutput):
@@ -89,10 +128,11 @@ class SparseAdaptiveEncoders(nn.Module):
             if i == 0:
                 q_rep = self.q_encoder(q_tokens[0], q_masks[0]).rep
                 q_value, q_logprob, q_action = self.modifier(q_tokens[0], q_masks[0]) 
-                # q_rep = q_rep * q_action
             else:
                 q_value, q_logprob, q_action = self.modifier(q_tokens[i], q_masks[i])
-                q_rep = q_reps[0] * q_action
+                q_rep = q_action
+                # q_rep =  q_reps[0] * q_action
+                # q_rep = q_reps[0] + q_action
 
             q_reps.append(q_rep)
             q_values.append(q_value)

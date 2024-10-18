@@ -41,6 +41,7 @@ def main():
     from modeling import SparseEncoder
     from modeling.biencoders import SparseAdaptiveEncoders
     from modeling.biencoders.sparse import RegularizationHead
+    from modeling.biencoders.sparse import MLMGumbelHead
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
     modifier = RegularizationHead(
@@ -50,6 +51,13 @@ def main():
             output='MLM', agg='max', activation='relu'
         )
     )
+    # modifier = MLMGumbelHead(
+    #     model_opt,
+    #     encoder=SparseEncoder(
+    #         model_name_or_path=model_opt.retriever_name_or_path,
+    #         output='MLM', agg='max', activation='relu'
+    #     )
+    # )
     ada_retriever = SparseAdaptiveEncoders(
         model_opt,
         encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path).eval(),

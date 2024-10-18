@@ -59,8 +59,8 @@ def augmentation_response(
     ## loading dependencies
     if 'asqa' in dataset_prefix:
         apply_docs_prompt = asqa.apply_docs_prompt
-        apply_rsp_inst_prompt = asqa.apply_rsp_inst_prompt_new
-        instruction_prompt = asqa.instruction_prompt_new
+        apply_rsp_inst_prompt = asqa.apply_rsp_inst_prompt
+        instruction_prompt = asqa.instruction_prompt
 
     if 'qampari' in dataset_prefix:
         apply_docs_prompt = qampari.apply_docs_prompt
@@ -121,7 +121,6 @@ def augmentation_feedback(
             Q=questions[i], 
             D=D,
             instruction=fbk_instruction_prompt,
-            prefix='Feedback:\n<f>'
         )
             # prefix='Follow-up query:\n<q>'
         prompts.append(prompt)

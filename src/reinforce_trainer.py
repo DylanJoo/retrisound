@@ -81,14 +81,14 @@ class Trainer(RewardTrainer):
                 candidate_pids = [self.train_dataset[idx]['candidate_pids'] for idx in data_indices]
 
             outputs = model(**retriever_inputs, include_n_feedbacks=t+1)
-            queries = outputs.q_reps[:, -1] # the last reformulated qemb
+            query = outputs.q_reps[:, -1] # the last reformulated qemb
             logprob = outputs.q_logprobs[:, -1]
 
             ### re-ranking without prepare contexts (deprecated)
             ### retrieval and prepare contexts
             hits = self.searcher.batch_search(
-                queries.float().detach().cpu().numpy(), 
-                q_ids=[str(i) for i in range(queries.size()[0])],
+                query.float().detach().cpu().numpy(), 
+                q_ids=[str(i) for i in range(query.size()[0])],
                 k=len(candidates[0])
             )
             candidates_ = []
@@ -131,23 +131,24 @@ class Trainer(RewardTrainer):
                 b_feedback = [f.rsplit('</f>', 1)[0] for f in b_feedback]
                 feedback += b_feedback
 
-            for i in range(len(data_indices)):
-                self.train_dataset.add_feedback(data_indices[i], feedback[i])
-                self.train_dataset.update_candidates(data_indices[i], candidate_pids_[i])
-
             ### calculate rewards (on policy)
             reward = self.reward_model.get_rewards(response, targets).view(-1)
             reward = reward.to(model.device)
             rewards.append(reward)
             logprobs.append(logprob)
 
+            ### add feedback if rewards is good enough
+            for i in range(len(data_indices)):
+                self.train_dataset.add_feedback(data_indices[i], feedback[i])
+                if reward[i] >= 1:
+                    self.train_dataset.update_candidates(data_indices[i], candidate_pids_[i])
+
         rewards = torch.stack(rewards, 1)
         logprobs = torch.stack(logprobs, 1)
-        # baseline = rewards[:, 0].view(-1, 1)
-        baseline = 0
 
         ## baseline can be the improved one-shot retrieval
-        reinforce_loss = ((rewards - baseline) * (-logprobs)).mean()
+        # reinforce_loss = (rewards * (-logprobs)).mean()
+        reinforce_loss = (rewards[:, 1:] * (-logprobs[:, 1:])).mean()
         contrastive_loss = outputs.loss
 
         loss = (reinforce_loss * self.args.rl_coef) + \
@@ -159,11 +160,12 @@ class Trainer(RewardTrainer):
 
         print('---')
         print('\nquestion: ', questions[0])
-        # print('\nAction value', \
-        #         self.tokenizer.batch_decode(torch.argsort(outputs.q_values[0], -1, descending=True)[:, :8]))
-        print('\nNext query value', \
+        print('\nAction top-k terms', \
+                self.tokenizer.batch_decode(torch.argsort(outputs.q_values[0], -1, descending=True)[:, :8]))
+        print('\nQuery top-k terms', \
                 self.tokenizer.batch_decode(torch.argsort(outputs.q_reps[0], -1, descending=True)[:, :8]))
-        print('\ncandidate titles: ', [c['title'] for c in candidates[0]])
+        print('\nOld candidate titles: ', [c['title'] for c in candidates[0]])
+        print('New candidate titles: ', [c['title'] for c in candidates_[0]])
         print('\nanswer: ', targets[0])
         print('\nresponse: ', response[0])
         print('\nfeedback: ', feedback[0])

@@ -57,11 +57,10 @@ class ContextQADataset(Dataset):
         self.sub_questions = [None] * self.length
         self.sub_answers = [None] * self.length
         self.corpus = {-1: {'text': "", 'title': ""}}
-        self.n_feedbacks = [0] * self.length
 
         ## dynamic attributes
-        # self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
         self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
+        self.n_feedbacks = [0] * self.length
         self._build(data)
 
         ## results for context candidates
@@ -84,10 +83,6 @@ class ContextQADataset(Dataset):
             self.sub_answers[idx] = data[idx]['sub_answers']
 
     def _load_retrieval(self, file):
-        """
-        [NOTE] Here we will do additional preprocess. 
-        We only keep the discard the passage
-        """
         self.candidate_pids = defaultdict(list)
         with open(file, 'r') as f:
             for line in tqdm(f):
@@ -102,7 +97,6 @@ class ContextQADataset(Dataset):
             for i, qid in enumerate(self.candidate_pids):
                 n_half = (self.n_max_candidates // 2)
                 first_half = self.candidate_pids[qid][:n_half]
-                # second_half = self.candidate_pids[qid][-n_half:]
                 second_half = self.candidate_pids[qids[max(0, i-1)]][-n_half:]
                 self.candidate_pids[qid] = (first_half + second_half)
 
@@ -117,10 +111,7 @@ class ContextQADataset(Dataset):
 
             for corpus in corpora:
                 for docid, docdict in corpus.items():
-                    try:
-                        self.corpus[docid].update(docdict)
-                    except:
-                        self.corpus[docid] = docdict
+                    self.corpus[docid] = docdict
             del corpora
 
     def __len__(self):
@@ -134,6 +125,10 @@ class ContextQADataset(Dataset):
         except: # means it's full
             self.feedbacks[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
             self.n_feedbacks[idx] = 1
+
+    def update_candidates(self, idx, candidate_pids):
+        qid = self.qids[idx]
+        self.candidate_pids[qid] += candidate_pids
 
     def __getitem__(self, idx):
         qid = self.qids[idx]
@@ -209,6 +204,8 @@ class ContextQACollator(DefaultDataCollator):
         batch_r['q_masks'] = [initial_q['attention_mask']]
 
         # encode the action/followup text segment-by-segment
+        # original_pad_token = self.tokenizer_r.pad_token
+        # self.tokenizer_r.pad_token = self.tokenizer_r.mask_token
         for seg_num in range(n_max_segments): 
             batch_action_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
             action_q = self.tokenizer_r.batch_encode_plus(
@@ -221,6 +218,7 @@ class ContextQACollator(DefaultDataCollator):
             ).to(device)
             batch_r['q_tokens'].append(action_q['input_ids'])
             batch_r['q_masks'].append(action_q['attention_mask'])
+        # self.tokenizer_r.pad_token = original_pad_token
 
         # encode the candidate texts
         candidate_size = len(features[0]['candidates'])

@@ -37,7 +37,6 @@ accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
-    --main_process_port 29501 \
     --deepspeed_config_file configs/zero2_config_accelerate.json \
     reinforce_train.py \
     --retriever_name_or_path $BASE_RET \
@@ -50,16 +49,16 @@ accelerate launch \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 6e-5 \
     --lr_scheduler_type linear \
-    --warmup_ratio 0.1 \
+    --warmup_ratio 0.2 \
     --weight_decay 0. \
     --num_train_epochs 1 \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 2 \
-    --n_contexts 10 \
-    --n_max_segments 3 \
-    --n_max_candidates 10 \
-    --num_steps 3 \
+    --n_contexts 5 \
+    --n_max_candidates 5 \
+    --n_max_segments 1 \
+    --num_steps 1 \
     --cont_coef 0.0 \
     --rl_coef 1.0 \
     --bf16 true \
