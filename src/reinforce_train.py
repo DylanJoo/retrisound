@@ -40,28 +40,20 @@ def main():
     ## Config & tokenizer
     from modeling import SparseEncoder
     from modeling.biencoders import SparseAdaptiveEncoders
-    from modeling.biencoders.sparse import RegularizationHead
-    from modeling.biencoders.sparse import MLMGumbelHead
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
-    modifier = RegularizationHead(
+    from modeling.biencoders.sparse import AttentionHead
+    modifier = AttentionHead(
         model_opt,
         encoder=SparseEncoder(
             model_name_or_path=model_opt.retriever_name_or_path,
             output='MLM', agg='max', activation='relu'
         )
     )
-    # modifier = MLMGumbelHead(
-    #     model_opt,
-    #     encoder=SparseEncoder(
-    #         model_name_or_path=model_opt.retriever_name_or_path,
-    #         output='MLM', agg='max', activation='relu'
-    #     )
-    # )
     ada_retriever = SparseAdaptiveEncoders(
         model_opt,
-        encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path).eval(),
-        modifier=modifier.train()
+        encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path),
+        modifier=modifier
     )
 
     # [Generator]
@@ -82,7 +74,7 @@ def main():
     # [RAG]
     generation_config = init_generation_config(model_opt, tokenizer_g)
 
-    from modeling import GenerativeRewardWrapper, Judgement
+    from modeling import GenerativeRewardWrapper, Judgement, Metric
     # reward_model = GenerativeRewardWrapper(
     #     generator=llm, 
     #     tokenizer=tokenizer_g, 
@@ -92,7 +84,7 @@ def main():
     reward_model = GenerativeRewardWrapper(
         generator=llm, 
         tokenizer=tokenizer_g, 
-        utility=Judgement(list(range(train_opt.n_max_candidates+1))),
+        utility=Judgement(list(range(6))),
         generation_config=generation_config
     ).eval()
 

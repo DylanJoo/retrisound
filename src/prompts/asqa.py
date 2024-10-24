@@ -1,20 +1,5 @@
-# prompts for answering
-# inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch result:\n{D}\n{PREFIX}"
-# instruction_prompt = "Answer the question using the provided search result (some of which might be irrelevant)."
+# context template
 doc_prompt_template = "[{ID}]{T}{P}\n"
-
-inst_prompt_template = "{INST}\n\nQuestion: {Q}\nSuggested answer: {A}\n\nSearch result:\n{D}\n{PREFIX}"
-# instruction_prompt_new = "Determine whether the following search result can answer the given question. A suggested answer is also provided for reference. Rate the search result as 0, 0.5, or 1, based on the guidelines below. Provide only the rating.\n\nGuideline:\n- 1: The search result fully answers the question and matches the relevant details in the suggested answer.\n- 0.5: The search result can answer the question but lacks sufficient detail.\n- 0: The search result cannot adequately answer the question."
-# instruction_prompt_new = "Determine which documents in the provided search result can support the human written suggested answer. Write the number of documents using the square bracket format. Leave it blank if none of them can support the answer."
-# instruction_prompt = "Determine how useful the provided search result tdocuments in hat can help answering the given question. The human written suggested answer is also provided for reference. Rate the search result from 0 to 10. Only provide the number of rating."
-instruction_prompt = "Determine how relevant the provided search result is in helping to answer the given question. A detailed human-written suggested answer is also provided for reference. Rate this search result as 0, 1, or 2 based on the guideline.\n\nGuideline:\n- 0: The search result is completely not relevant to the suggested answer at all.\n- 1: The search result partially supports the suggested answer but lack some details.\n- 2: The search result perfectly support the suggested answer."
-
-## ===== WITH ANSWER =====
-fbk_inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch result:\n{D}\n{PREFIX}"
-# fbk_instruction_prompt = "Read the given question and review the search result listed below. Identify the relevance information in the results and write the next follow-up query for searching additional information. Write within `<f>` and `</f>` tags."
-fbk_instruction_prompt = "Read the given question and the corresponding search result. Generate a follow-up question to extend the topic of the question."
-# Subquestion
-
 def apply_docs_prompt(doc_items, field='text'):
     p = ""
     for idx, doc_item in enumerate(doc_items):
@@ -29,6 +14,12 @@ def apply_docs_prompt(doc_items, field='text'):
         p += p_doc
     return p
 
+# prompts for response
+inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch results:\n{D}\n{PREFIX}"
+inst_prompt_template = "{INST}\n\nQuestion: {Q}\nSuggested answer: {A}\n\nSearch result:\n{D}\n{PREFIX}"
+instruction_prompt = "Instruction: Write an accurate, engaging, and concise answer for the given question using only the provided search results (some of which might be irrelevant) and cite them properly. Use an unbiased and journalistic tone. Always cite for any factual claim. When citing several search results, use [1][2][3]. Cite at least one document and at most three documents in each sentence. If multiple documents support the sentence, only cite a minimum sufficient subset of the documents."
+instruction_prompt = "Instruction: Determine how many useful the provided search results can help answering the given question. A human written suggested answer is also provided for your reference. Rate the search results from 0 to the number of documents. Only provide one overall rating for all of the documents.\n\nGuideline:\n- 2: The search results completely answer the question and match the details of the suggested answer.\n- 1: The search results can answer the question but lack some details of the suggested answer.\n- 0: The search results cannot answer the question."
+
 def apply_rsp_inst_prompt(Q, D, A, instruction="", prefix="Rating:\n"):
     p = inst_prompt_template
     p = p.replace("{INST}", instruction).strip()
@@ -36,7 +27,29 @@ def apply_rsp_inst_prompt(Q, D, A, instruction="", prefix="Rating:\n"):
     p = p.replace("{PREFIX}", prefix).strip()
     return p
 
-def apply_fbk_inst_prompt(Q, D, instruction="", prefix="Next question:\n", *kwargs):
+inst_prompt_template = "Instruction: {INST}\n\nGuideline:\n{G}\n\nQuestion: {Q}\n\nSuggested answer: {A}\n\nContext: {D}\n\n{PREFIX}" 
+guideline = "- 5: The context is highly relevant, complete, and accurate.\n- 4: The context is mostly relevant and complete but may have minor gaps or inaccuracies.\n- 3: The context is partially relevant and complete, with noticeable gaps or inaccuracies.\n- 2: The context has limited relevance and completeness, with significant gaps or inaccuracies.\n- 1: The context is minimally relevant or complete, with substantial shortcomings.\n- 0: The context is not relevant or complete at all."
+instruction_prompt = "Determine whether the question can be answered based on the provided context? The suggested answer is also provided for reference. Rate the context with on a scale from 0 to 5 according to the guideline below. Do not write anything except the rating. Rate 0 if the context is empty."
+def apply_rsp_inst_prompt(Q, D, A, instruction="", prefix="Rating:"):
+    p = inst_prompt_template
+    p = p.replace("{G}", guideline)
+    p = p.replace("{INST}", instruction).strip()
+    p = p.replace("{Q}", Q)
+    p = p.replace("{D}", D)
+    p = p.replace("{A}", A)
+    p = p.replace("{PREFIX}", prefix).strip()
+    return p
+    # p_output = []
+    # for d in D:
+    #     pi = p.replace("{d}", d)
+    #     p_output.append(pi)
+    # return p_output
+
+# prompts for feedback
+fbk_inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch results:\n{D}\n{PREFIX}"
+fbk_instruction_prompt = "Instruction: Write an accurate, engaging, and concise answer for the given question using only the provided search results (some of which might be irrelevant) and cite them properly. Use an unbiased and journalistic tone. Always cite for any factual claim. When citing several search results, use [1][2][3]. Cite at least one document and at most three documents in each sentence. If multiple documents support the sentence, only cite a minimum sufficient subset of the documents."
+
+def apply_fbk_inst_prompt(Q, D, instruction="", prefix="Report:\n", *kwargs):
     p = fbk_inst_prompt_template
     p = p.replace("{INST}", instruction).strip()
     p = p.replace("{Q}", Q).replace("{D}", D)

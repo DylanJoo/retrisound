@@ -27,6 +27,7 @@ class ContextQADataset(Dataset):
         depth=30,
         corpus_file=None,
         retrieval_file=None,
+        judgement_file=None,
         quick_test=None,
         half_with_bottom=False
     ):
@@ -57,6 +58,8 @@ class ContextQADataset(Dataset):
         self.sub_questions = [None] * self.length
         self.sub_answers = [None] * self.length
         self.corpus = {-1: {'text': "", 'title': ""}}
+        if quick_test is not None:
+            self.corpus = defaultdict(lambda: {'text': "this is a testing doc.", 'title': "this is a testing title."})
 
         ## dynamic attributes
         self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
@@ -73,6 +76,12 @@ class ContextQADataset(Dataset):
         if corpus_file is not None:
             self._load_corpus(corpus_file)
 
+        ## load prerun judgements
+        self.judgements = {}
+        for qid in self.qids:
+            self.judgements[qid] = defaultdict(int)
+        if judgement_file is not None:
+            self._load_judgement(judgement_file)
 
     def _build(self, data):
         for idx in range(self.length):
@@ -100,6 +109,15 @@ class ContextQADataset(Dataset):
                 second_half = self.candidate_pids[qids[max(0, i-1)]][-n_half:]
                 self.candidate_pids[qid] = (first_half + second_half)
 
+    def _load_judgement(self, file):
+        try:
+            with open(file, 'r') as f:
+                for line in tqdm(f):
+                    qid, psgid, judge = line.strip().split()
+                    self.judgements[qid][psgid] = judge
+        except:
+            return 0
+
     def _load_corpus(self, dir):
         from multiprocessing import Pool
         files = glob(f'{dir}/*jsonl*')
@@ -126,6 +144,11 @@ class ContextQADataset(Dataset):
             self.feedbacks[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
             self.n_feedbacks[idx] = 1
 
+    def add_judgements(self, idx, judgements):
+        qid = self.qids[idx]
+        for pid in judgements[qid]:
+            self.judgements[qid][pid] = judgements[qid][pid]
+
     def update_candidates(self, idx, candidate_pids):
         qid = self.qids[idx]
         self.candidate_pids[qid] += candidate_pids
@@ -142,6 +165,7 @@ class ContextQADataset(Dataset):
                 'feedbacks': self.feedbacks[idx],
                 'n_feedbacks': self.n_feedbacks[idx],
                 'answers': self.answers[idx],
+                'sub_answers': self.sub_answers[idx],
                 'candidate_pids': cand_pids, 
                 'candidates': [self.corpus[pid] for pid in cand_pids],} # this is for reranker 
 
@@ -176,6 +200,7 @@ class ContextQACollator(DefaultDataCollator):
         batch['index'] = [f['index'] for f in features] # we record it 
         batch['questions'] = [f['questions'] for f in features] 
         batch['targets'] = [f['answers'] for f in features] 
+        batch['answers'] = [f['sub_answers'] for f in features] 
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
         batch['candidate_pids'] = [f['candidate_pids'] for f in features] 

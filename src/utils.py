@@ -43,19 +43,9 @@ def augmentation_response(
     n_context,
     rankings=None,
     dataset_prefix='asqa',
-    answers=None
+    answers=None,
+    independent=False
 ):
-
-    # prepare contexts using ranking
-    if rankings is not None:
-        assert len(candidates) == rankings.size(0)
-        contexts = []
-        for i in range(len(rankings)):
-            reranked_context = [candidates[i][j] for j in rankings[i]]
-            contexts.append(reranked_context[:n_context])
-    else:
-        contexts = [clist[:n_context] for clist in candidates] 
-
     ## loading dependencies
     if 'asqa' in dataset_prefix:
         apply_docs_prompt = asqa.apply_docs_prompt
@@ -69,17 +59,27 @@ def augmentation_response(
 
     # prepare prompts
     prompts = []
-
-    for i in range(len(questions)):
-        ## for answering
-        D = apply_docs_prompt(contexts[i], field='text')
-        prompt = apply_rsp_inst_prompt(
-            Q=questions[i], 
-            D=D,
-            instruction=instruction_prompt,
-            A=answers[i],
-        )
-        prompts.append(prompt)
+    if independent:
+        for j in range(len(candidates)):
+            d = apply_docs_prompt([candidates[j]], field='text')
+            prompt = apply_rsp_inst_prompt(
+                Q=questions, 
+                D=d,
+                instruction=instruction_prompt,
+                A=answers,
+            )
+            prompts.append(prompt)
+    else:
+        contexts = [clist[:n_context] for clist in candidates] 
+        for i in range(len(questions)):
+            D = apply_docs_prompt(contexts[i], field='text')
+            prompt = apply_rsp_inst_prompt(
+                Q=questions[i], 
+                D=D,
+                instruction=instruction_prompt,
+                A=answers[i],
+            )
+            prompts.append(prompt)
 
     return prompts
 

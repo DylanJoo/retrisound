@@ -32,28 +32,31 @@ class Metric:
         return results
 
 class Judgement:
-    def __init__(self, scales=None):
+    def __init__(self, scales=None, counting=False):
         if scales:
             self.scale = scales
         else:
             self.scale = list(range(0, 6)) # 0, 1, ...., 5
+        self.counting = counting
 
     def compute(self, judgements):
-        pattern = re.compile(r"[\d\.\d]+")
 
         results = [0] * len(judgements)
         for i, judgement in enumerate(judgements):
-            result = re.findall(pattern, judgement + "-1")[0]
-            try:
-                result = min(self.scale) if len(result) == 0 else float(result)
-                results[i] = min(result, self.scale[-1])
-            except:
-                results[i] = float(0)
+
+            if self.counting:
+                pattern = re.compile(r"[\d\d]\]+")
+                result = re.findall(pattern, judgement)
+                result = max(self.scale[0], len(result))
+            else:
+                pattern = re.compile(r"[\d\d]+")
+                result = re.findall(pattern, judgement + "-1")[0]
+                result = max(self.scale[0], float(result))
+            results[i] = min(result, self.scale[-1])
         results = torch.tensor(results).float()
         return results
 
 class GenerativeRewardWrapper(nn.Module):
-
     def __init__(self, generator, tokenizer, utility, generation_config):
         super().__init__()
         self.generator = generator
@@ -70,7 +73,7 @@ class GenerativeRewardWrapper(nn.Module):
         self, 
         queries=None,
         query_tensors=None,
-        max_new_tokens=64
+        max_new_tokens=128
     ):
         default = self.tokenizer.padding_side
 

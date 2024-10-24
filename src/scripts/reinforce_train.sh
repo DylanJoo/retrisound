@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=5hr-adarag
+#SBATCH --job-name=debug
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -8,11 +8,13 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --time=05:00:00
 #SBATCH --output=logs/%x.%j.out
-
+# 5hr-adarag
 # Set-up the environment.
 source ${HOME}/.bashrc
 conda activate retrisound
 export CUDA_HOME=/usr/local/cuda
+
+cd /home/dju/retrisound/src/
 
 # Start the experiment.
 index_dir=${HOME}/indexes/asqa
@@ -20,8 +22,8 @@ data_dir=${HOME}/datasets/asqa
 
 # Setups
 NUM_GPUS=1
-BATCH_SIZE_PER_GPU=8
-TOTAL_BATCH_SIZE=8
+BATCH_SIZE_PER_GPU=4
+TOTAL_BATCH_SIZE=4
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3
@@ -47,7 +49,7 @@ accelerate launch \
     --retrieval_file /home/dju/datasets/asqa/train_data_bm25-top100.run \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 6e-5 \
+    --learning_rate 5e-5 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.2 \
     --weight_decay 0. \
@@ -59,6 +61,7 @@ accelerate launch \
     --n_max_candidates 5 \
     --n_max_segments 1 \
     --num_steps 1 \
+    --samples 3 \
     --cont_coef 0.0 \
     --rl_coef 1.0 \
     --bf16 true \

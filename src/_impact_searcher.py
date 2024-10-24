@@ -149,7 +149,8 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         for logit in logits:
             jquery = JHashMap()
             if self.encoder_type == 'pytorch':
-                encoded_query = self.encode(text=None, batch_aggregated_logits=logits)
+                logit = np.expand_dims(logit, axis=0)
+                encoded_query = self.encode(text=None, batch_aggregated_logits=logit)
                 for (token, weight) in encoded_query.items():
                     if token in self.idf and self.idf[token] > self.min_idf:
                         jquery.put(token, JInt(weight))
