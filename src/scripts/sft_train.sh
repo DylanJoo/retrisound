@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=5hr-adarag
+#SBATCH --job-name=1hr-sft
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -39,7 +39,7 @@ accelerate launch \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
     --deepspeed_config_file configs/zero2_config_accelerate.json \
-    reinforce_train.py \
+    sft_train.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --attn_implementation flash_attention_2 \
@@ -56,15 +56,15 @@ accelerate launch \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 2 \
-    --n_contexts 10 \
-    --n_max_candidates 10 \
-    --n_max_segments 3 \
-    --num_steps 3\
+    --n_contexts 5 \
+    --n_max_candidates 2 \
+    --n_max_segments 5 \
+    --num_steps 5 \
     --samples 1 \
-    --cont_coef 0.0 \
-    --rl_coef 1.0 \
+    --cont_coef 1.0 \
+    --rl_coef 0.001 \
     --bf16 true \
-    --quick_test 5000 \
+    --judgement_file /home/dju/temp/judge-Oct27-0810.txt \
     --lucene_index_dir /home/dju/indexes/wikipedia_split/splade-v3.psgs_w100.lucene \
     --logging_steps 1
 

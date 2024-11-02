@@ -24,6 +24,7 @@ class ContextQADataset(Dataset):
         self, 
         data_file, 
         n_max_segments=10,
+        n_max_candidates=10,
         depth=30,
         corpus_file=None,
         retrieval_file=None,
@@ -47,6 +48,7 @@ class ContextQADataset(Dataset):
         self.quick_test = quick_test 
         self.length = len(data)
         self.n_max_segments = n_max_segments
+        self.n_max_candidates = n_max_candidates
         self.depth = depth
         self.half_with_bottom = half_with_bottom
 
@@ -64,8 +66,12 @@ class ContextQADataset(Dataset):
         self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
         self.n_feedbacks = [0] * self.length
         self._build(data)
-        self.positives = defaultdict(list)
-        self.negatives = defaultdict(list)
+
+        ## results for context candidates
+        if retrieval_file is not None:
+            self._load_retrieval(retrieval_file)
+        else:
+            self.candidate_pids = None
 
         ## corpus for mapping
         if corpus_file is not None:
@@ -84,6 +90,24 @@ class ContextQADataset(Dataset):
             self.answers[idx] = data[idx]['last_answer']
             self.sub_questions[idx] = data[idx]['sub_questions']
             self.sub_answers[idx] = data[idx]['sub_answers']
+
+    def _load_retrieval(self, file):
+        self.candidate_pids = defaultdict(list)
+        with open(file, 'r') as f:
+            for line in tqdm(f):
+                qid, _, docid, rank, score, _ = line.strip().split()
+                if int(rank) <= self.depth:
+                    self.candidate_pids[qid].append(docid)
+                    self.corpus[docid] = {'text': "", 'title': ""}
+                    # remove this if `_load_corpus` doesn't need to predefine
+
+        qids = list(self.candidate_pids.keys())
+        if self.half_with_bottom:
+            for i, qid in enumerate(self.candidate_pids):
+                n_half = (self.n_max_candidates // 2)
+                first_half = self.candidate_pids[qid][:n_half]
+                second_half = self.candidate_pids[qids[max(0, i-1)]][-n_half:]
+                self.candidate_pids[qid] = (first_half + second_half)
 
     def _load_judgement(self, file):
         file = (file or f'/home/dju/temp/judge-{datetime.datetime.now().strftime("%b%d-%I%m")}.txt')
@@ -136,28 +160,28 @@ class ContextQADataset(Dataset):
                 else:
                     f.write(f"{qid}\t{pid}\t{j}\n")
 
-    def update_candidates(self, idx, pids, scores=None):
+    def update_candidates(self, idx, candidate_pids):
         qid = self.qids[idx]
-        for i, pid in enumerate(pids):
-            if scores[i] < 3:
-                self.negatives[qid].append(pid)
-            elif scores[i] > 5:
-                self.positives[qid].append(pid)
+        self.candidate_pids[qid] += candidate_pids
 
     def __getitem__(self, idx):
         qid = self.qids[idx]
+        cand_pids = self.candidate_pids[qid][:self.n_max_candidates] # can be qid or idx
+
+        if len(cand_pids) < self.n_max_candidates:
+            cand_pids += [-1] * max(0, self.n_max_candidates - len(cand_pids))
 
         n_feedbacks = self.n_feedbacks[idx]
         if n_feedbacks >= 1:
-            positive_context = [{"text": self.feedbacks[idx][n_feedbacks - 1], "title": ""}]
-            negative_context = [self.corpus[pid] for pid in (self.negatives[qid]+[-1])[:1]]
             return {'index': idx,
                     'questions': self.questions[idx], 
                     'feedbacks': self.feedbacks[idx],
                     'n_feedbacks': self.n_feedbacks[idx],
                     'answers': self.answers[idx],
                     'sub_answers': self.sub_answers[idx],
-                    'candidates': positive_context + negative_context}
+                    'candidate_pids': cand_pids, 
+                    'candidates': [{"text": self.feedbacks[idx][n_feedbacks - 1], "title": ""}] + \
+                            [self.corpus[pid] for pid in cand_pids[:-1]],} # this is for reranker 
         else:
             return {'index': idx,
                     'questions': self.questions[idx], 
@@ -165,7 +189,8 @@ class ContextQADataset(Dataset):
                     'n_feedbacks': self.n_feedbacks[idx],
                     'answers': self.answers[idx],
                     'sub_answers': self.sub_answers[idx],
-                    'candidates': [{"text": "", "title": ""}, {"text": "", "title": ""}]}
+                    'candidate_pids': cand_pids, 
+                    'candidates': [self.corpus[pid] for pid in cand_pids],} # this is for reranker 
 
 @dataclass
 class ContextQACollator(DefaultDataCollator):
@@ -201,6 +226,7 @@ class ContextQACollator(DefaultDataCollator):
         batch['answers'] = [f['sub_answers'] for f in features] 
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
+        batch['candidate_pids'] = [f['candidate_pids'] for f in features] 
         batch['n_feedbacks'] = [f['n_feedbacks'] for f in features] 
         return batch
 

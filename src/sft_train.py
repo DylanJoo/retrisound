@@ -39,10 +39,10 @@ def main():
     # [Retriever]
     ## Config & tokenizer
     from modeling import SparseEncoder
-    from modeling.biencoders import SparseAdaptiveEncoders
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
-    from modeling.biencoders.sparse import AttentionHead, AttentionTopkHead
+    from modeling.biencoders.sparse_new import SparseAdaptiveEncoders
+    from modeling.biencoders.sparse_new import AttentionHead, AttentionTopkHead
     modifier = AttentionHead(
         model_opt,
         encoder=SparseEncoder(
@@ -50,17 +50,11 @@ def main():
             output='MLM', agg='max', activation='relu'
         )
     ).train()
-    # modifier = AttentionTopkHead(
-    #     model_opt,
-    #     encoder=SparseEncoder(
-    #         model_name_or_path=model_opt.retriever_name_or_path,
-    #         output='MLM', agg='max', activation='relu'
-    #     )
-    # )
     ada_retriever = SparseAdaptiveEncoders(
         model_opt,
         encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path),
-        modifier=modifier
+        modifier=modifier,
+        n_candidates=train_opt.n_max_candidates
     )
 
     # [Generator]
@@ -105,10 +99,10 @@ def main():
     train_dataset = ContextQADataset(
         data_file=data_opt.train_file, 
         n_max_segments=train_opt.n_max_segments,
-        n_max_candidates=train_opt.n_max_candidates,
         depth=data_opt.depth,
         corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
+        judgement_file=data_opt.judgement_file,
         quick_test=train_opt.quick_test,
         half_with_bottom=train_opt.half_with_bottom
     )
@@ -121,7 +115,7 @@ def main():
 
     # [trainer]
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from reinforce_trainer import Trainer
+    from sft_trainer import Trainer
     trainer = Trainer(
         args=train_opt,
         reward_model=reward_model,

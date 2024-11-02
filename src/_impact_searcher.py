@@ -81,44 +81,6 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
             to_return.append(_weights)
         return to_return
 
-    def search(self, logit: torch.FloatTensor = None, k: int = 10, fields=dict()) -> List[JScoredDoc]:
-        """Search the collection.
-
-        Parameters
-        ----------
-        logit : torch.FloatTensor
-            Query sparse vector.
-        k : int
-            Number of hits to return.
-        fields : dict
-            Optional map of fields to search with associated boosts.
-
-        Returns
-        -------
-        List[JScoredDoc]
-            List of search results.
-        """
-
-        jfields = JHashMap()
-        for (field, boost) in fields.items():
-            jfields.put(field, JFloat(boost))
-
-        if self.encoder_type == 'pytorch':
-            jquery = JHashMap()
-            encoded_query = self.encode(text=None, batch_aggregated_logits=logit)
-            for (token, weight) in encoded_query.items():
-                if token in self.idf and self.idf[token] > self.min_idf:
-                    jquery.put(token, JInt(weight))
-        else:
-            jquery = q
-
-        if not fields:
-            hits = self.object.search(jquery, k)
-        else:
-            hits = self.object.searchFields(jquery, jfields, k)
-
-        return hits
-
     def batch_search(self, 
                      logits: torch.FloatTensor = None, 
                      q_ids: List[str] = None,
@@ -222,3 +184,40 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         """Close the searcher."""
         self.object.close()
 
+    # def search(self, logit: torch.FloatTensor = None, k: int = 10, fields=dict()) -> List[JScoredDoc]:
+    #     """Search the collection.
+    #
+    #     Parameters
+    #     ----------
+    #     logit : torch.FloatTensor
+    #         Query sparse vector.
+    #     k : int
+    #         Number of hits to return.
+    #     fields : dict
+    #         Optional map of fields to search with associated boosts.
+    #
+    #     Returns
+    #     -------
+    #     List[JScoredDoc]
+    #         List of search results.
+    #     """
+    #
+    #     jfields = JHashMap()
+    #     for (field, boost) in fields.items():
+    #         jfields.put(field, JFloat(boost))
+    #
+    #     if self.encoder_type == 'pytorch':
+    #         jquery = JHashMap()
+    #         encoded_query = self.encode(text=None, batch_aggregated_logits=logit)
+    #         for (token, weight) in encoded_query.items():
+    #             if token in self.idf and self.idf[token] > self.min_idf:
+    #                 jquery.put(token, JInt(weight))
+    #     else:
+    #         jquery = q
+    #
+    #     if not fields:
+    #         hits = self.object.search(jquery, k)
+    #     else:
+    #         hits = self.object.searchFields(jquery, jfields, k)
+    #
+    #     return hits

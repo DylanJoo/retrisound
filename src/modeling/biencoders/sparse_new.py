@@ -91,18 +91,24 @@ class AttentionHead(nn.Module):
         )[1]
         attention_scores = attention_scores.mean(1)
 
-        ## maximum feedback-token including score
+        ## maximum feedback-token including score B Lq Lf --> B Lf
         aggregated_scores = torch.max(attention_scores, dim=1).values
 
         ## transform into probability of actions 
         logprobs, actions, values = [], [], []
+
+        # Self token-level to feedback squence distillation
+        mse = torch.nn.MSELoss()
+        pseudo_scores = torch.log( 1+torch.relu(out.logits) ) / (1+q_out.reps.unsqueeze(1))
+        pseudo_scores = pseudo_scores.max(-1).values
+        print(pseudo_scores[0])
+        loss_mse = mse(aggregated_scores, pseudo_scores)
 
         ## Opt1: sampling
         probs = torch.sigmoid(aggregated_scores)
         probs = probs * attention_mask
         print('\nprob (pos)', (probs>=0.5).sum(-1) / probs.shape[-1])
         print('\nprob (neg)', (probs<0.5).sum(-1) / probs.shape[-1])
-        # print('\nprob (max)', probs.max(-1).values)
         dist = torch.distributions.Bernoulli(probs) # B Lf
         ## actions:  [ (B Lf), (B Lf), ...]
         ## values:   [ (B V), (B V), ...]
@@ -119,20 +125,20 @@ class AttentionHead(nn.Module):
             logprobs.append(logprob)
 
             # [opt1] combine them and do the pooling together
-            aggregated_logits = torch.cat(
-                [q_out.logits, out.logits * action.unsqueeze(-1)], 
-                dim=1
-            )
-            value, _ = torch.max(
-                torch.log(1 + torch.relu(aggregated_logits)) * 
-                torch.cat([q_out.mask, attention_mask], dim=1).unsqueeze(-1), 
-                dim=1
-            )
+            # aggregated_logits = torch.cat(
+            #     [q_out.logits, out.logits * action.unsqueeze(-1)], 
+            #     dim=1
+            # )
+            # value, _ = torch.max(
+            #     torch.log(1 + torch.relu(aggregated_logits)) * 
+            #     torch.cat([q_out.mask, attention_mask], dim=1).unsqueeze(-1), 
+            #     dim=1
+            # )
 
             # [opt2] combine them before pooling feedback-aware logit
-            # old_logits = torch.max(q_out.logits, dim=1).values
-            # new_logits = torch.max(out.logits * action.unsqueeze(-1), dim=1).values
-            # value = torch.log(1 + torch.relu(old_logits + new_logits))
+            old_logits = torch.max(q_out.logits, dim=1).values
+            new_logits = torch.max(out.logits * action.unsqueeze(-1), dim=1).values
+            value = torch.log(1 + torch.relu(old_logits + new_logits))
 
             # [opt3] replace with feedback-aware logit
             # new_logits = out.logits * action.unsqueeze(-1)
@@ -142,7 +148,8 @@ class AttentionHead(nn.Module):
             # )
 
             values.append(value)
-        return values, logprobs, actions, q_out
+
+        return values, logprobs, actions, out, loss_mse
 
 @dataclass
 class EncodersOutput(BaseModelOutput):
@@ -153,6 +160,7 @@ class EncodersOutput(BaseModelOutput):
     q_out: Optional[SEOutput] = None
     d_reps: torch.FloatTensor = None
     loss: torch.FloatTensor = None
+    loss_d: torch.FloatTensor = None
     scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
 
@@ -185,22 +193,25 @@ class SparseAdaptiveEncoders(nn.Module):
         n_segments = len(q_tokens)
         max_num_steps = kwargs.pop('include_n_feedbacks', n_segments)
         batch_size = q_tokens[0].size(0)
+        losses_distill = []
         q_reps = []
         q_logprobs = []
         q_actions = []
 
         # encode query feedback
         for i in range(1, max_num_steps+1): # [1, ..., max_num_steps]
-            q_rep, q_logprob, q_action, q_out = self.modifier(q_tokens[i], q_masks[i], prev_out)
+            q_rep, q_logprob, q_action, q_out, loss_distill = self.modifier(q_tokens[i], q_masks[i], prev_out)
             q_reps += q_rep
             q_logprobs += q_logprob
             q_actions += q_action
             ## actions:  [ (B Lf), (B Lf), ...]
             ## values:   [ (B V), (B V), ...]
             ## logprob:  [ (B), (B), ...]
+            losses_distill.append(loss_distill)
 
         q_reps = torch.stack(q_reps, dim=1) # B N V
         q_logprobs = torch.stack(q_logprobs, dim=1) # B N
+        losses_distill = torch.stack(losses_distill, dim=0).mean()
 
         # loss calculation
         scores, loss_r = None, 0.0
@@ -209,7 +220,7 @@ class SparseAdaptiveEncoders(nn.Module):
         # encode document if using contrastive signals
         d_reps = []
         if (d_tokens is not None):
-            n_candidates = (self.n_candidates or len(d_tokens))
+            n_candidates = min(self.n_candidates, len(d_tokens))
             for i in range(n_candidates):
                 d_rep = self.d_encoder(d_tokens[i], d_masks[i]).reps # B H
                 d_reps.append(d_rep)
@@ -228,6 +239,7 @@ class SparseAdaptiveEncoders(nn.Module):
             q_out=q_out,
             d_reps=d_reps,
             loss=loss_r,
+            loss_d=losses_distill,
             scores=scores, 
             logs={'InfoNCE': loss_r}
         )

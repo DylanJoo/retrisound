@@ -164,6 +164,8 @@ class Trainer(RewardTrainer):
         batch_size, step_size = len(questions), self.args.num_steps
 
         ### sampling
+        ct_losses = []
+        distill_losses = []
         logprobs = []
         rewards = []
         for t in range(0, self.args.num_steps+1):
@@ -185,7 +187,7 @@ class Trainer(RewardTrainer):
                     [self.train_dataset[idx] for idx in data_indices],
                     device=model.device
                 )
-                output = model(**retriever_inputs, prev_output=prev_output, include_n_feedbacks=t)
+                output = model(**retriever_inputs, prev_out=prev_output, include_n_feedbacks=t)
                 prev_output = output.q_out
 
                 # get rewards over samples
@@ -204,27 +206,39 @@ class Trainer(RewardTrainer):
 
                 # the expected retrieved candidates 
                 feedback = self.compute_loss_feedback(questions, candidates) 
-                losses.append(output.loss)
-
+                ct_losses.append(output.loss)
+                distill_losses.append(output.loss_d)
 
             # [NOTE] here we use the last sample as the stored feedback
             for j in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[j], feedback[j])
-                self.train_dataset.add_judgements(data_indices[j], judges[j], info=questions[j])
+                # self.train_dataset.add_judgements(data_indices[j], judges[j], info=questions[j])
+                self.train_dataset.update_candidates(
+                    idx=data_indices[j],
+                    pids=list(judges[j].keys()),
+                    scores=list(judges[j].values())
+                )
+    # def update_candidates(self, idx, pids, scores=None):
 
         rewards = torch.stack(rewards, 1)
         logprobs = torch.stack(logprobs, 1)
-        contrastive_loss = torch.stack(losses, 1)
+        contrastive_loss = torch.stack(ct_losses, 0)
+        distill_loss = torch.stack(distill_losses, 0)
 
         ## baseline can be the improved one-shot retrieval
         reinforce_loss = (rewards * (-logprobs)).mean()
         contrastive_loss = contrastive_loss.mean()
+        distill_loss = distill_loss.mean()
 
-        loss = (reinforce_loss * self.args.rl_coef) + \
-                (contrastive_loss * self.args.cont_coef)
+        # loss = (reinforce_loss * self.args.rl_coef) + \
+        #         (contrastive_loss * self.args.cont_coef) + \
+        #         (distill_loss * self.args.cont_coef)
+        loss = (reinforce_loss * self.args.rl_coef) + (distill_loss * self.args.cont_coef)
+
 
         self.log({"train/reward": rewards.mean().item()})
         self.log({"loss/RL": reinforce_loss.mean().item()})
+        self.log({"loss/Distill": distill_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
 
         print('---')

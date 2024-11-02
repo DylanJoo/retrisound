@@ -28,7 +28,7 @@ def apply_rsp_inst_prompt(Q, D, A, instruction="", prefix="Rating:\n"):
     return p
 
 inst_prompt_template = "Instruction: {INST}\n\nGuideline:\n{G}\n\nQuestion: {Q}\n\nSuggested answer: {A}\n\nContext: {D}\n\n{PREFIX}" 
-guideline = "- 5: The context is highly relevant, complete, and accurate.\n- 4: The context is mostly relevant and complete but may have minor gaps or inaccuracies.\n- 3: The context is partially relevant and complete, with noticeable gaps or inaccuracies.\n- 2: The context has limited relevance and completeness, with significant gaps or inaccuracies.\n- 1: The context is minimally relevant or complete, with substantial shortcomings.\n- 0: The context is not relevant or complete at all."
+guideline = "- 5: The context is highly relevant, complete, and accurate to the suggested answer.\n- 4: The context is mostly relevant and complete but may have minor gaps or inaccuracies to the suggested answer.\n- 3: The context is partially relevant and complete, with noticeable gaps or inaccuracies to the suggested answer.\n- 2: The context has limited relevance and completeness, with significant gaps or inaccuracies to the suggested answer.\n- 1: The context is minimally relevant or complete, with substantial shortcomings to the suggested answer.\n- 0: The context is not relevant or complete at all."
 instruction_prompt = "Determine whether the question can be answered based on the provided context? The suggested answer is also provided for reference. Rate the context with on a scale from 0 to 5 according to the guideline below. Do not write anything except the rating. Rate 0 if the context is empty."
 def apply_rsp_inst_prompt(Q, D, A, instruction="", prefix="Rating:"):
     p = inst_prompt_template
@@ -48,8 +48,10 @@ def apply_rsp_inst_prompt(Q, D, A, instruction="", prefix="Rating:"):
 # prompts for feedback
 fbk_inst_prompt_template = "{INST}\n\nQuestion: {Q}\n\nSearch results:\n{D}\n{PREFIX}"
 fbk_instruction_prompt = "Instruction: Write an accurate, engaging, and concise answer for the given question using only the provided search results (some of which might be irrelevant) and cite them properly. Use an unbiased and journalistic tone. Always cite for any factual claim. When citing several search results, use [1][2][3]. Cite at least one document and at most three documents in each sentence. If multiple documents support the sentence, only cite a minimum sufficient subset of the documents."
+# fbk_instruction_prompt = "Instruction: Read the given question and review the search results listed below. Identify the relevance information and write a 30 words feedback that can help search engine match more useful documents. Do not write anything except the feedback."
 
 def apply_fbk_inst_prompt(Q, D, instruction="", prefix="Report:\n", *kwargs):
+# def apply_fbk_inst_prompt(Q, D, instruction="", prefix="Feedback:\n", *kwargs):
     p = fbk_inst_prompt_template
     p = p.replace("{INST}", instruction).strip()
     p = p.replace("{Q}", Q).replace("{D}", D)

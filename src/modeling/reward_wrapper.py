@@ -69,6 +69,7 @@ class GenerativeRewardWrapper(nn.Module):
         for n, p in self.generator.named_parameters():
             p.requires_grad = False
 
+    @torch.no_grad()
     def _inference(
         self, 
         queries=None,

@@ -25,6 +25,7 @@ class DataOptions:
     train_file: Optional[str] = field(default=None)
     corpus_file: Optional[str] = field(default=None)
     retrieval_file: Optional[str] = field(default=None)
+    judgement_file: Optional[str] = field(default=None)
     depth: Optional[int] = field(default=30)
 
 from trl.trainer.reward_config import RewardConfig
@@ -51,6 +52,7 @@ class ReinforceOptions(RewardConfig):
     cont_coef: Optional[float] = field(default=0.0)
     rl_coef: Optional[float] = field(default=1.0)
     half_with_bottom: bool = field(default=False)
+    reward_type: str = field(default='normal')
 
 from trl.trainer.ppov2_config import PPOv2Config
 @dataclass
