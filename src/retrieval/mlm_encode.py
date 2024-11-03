@@ -48,7 +48,7 @@ def generate_vocab_vector(
     ).to(device)
 
     with torch.no_grad():
-        doc_reps = encoder(**inputs).rep
+        doc_reps = encoder(**inputs).reps
 
     # get the number of non-zero dimensions in the rep:
     cols = torch.nonzero(doc_reps)

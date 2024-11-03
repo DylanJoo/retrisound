@@ -41,9 +41,8 @@ def main():
     from modeling import SparseEncoder
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
-    from modeling.biencoders.sparse_new import SparseAdaptiveEncoders
-    from modeling.biencoders.sparse_new import AttentionHead, AttentionTopkHead
-    modifier = AttentionHead(
+    from modeling.biencoders.sparse_new import SparseAdaptiveEncoders, AttentionHead, BERTHead
+    modifier = BERTHead(
         model_opt,
         encoder=SparseEncoder(
             model_name_or_path=model_opt.retriever_name_or_path,
@@ -76,12 +75,6 @@ def main():
     generation_config = init_generation_config(model_opt, tokenizer_g)
 
     from modeling import GenerativeRewardWrapper, Judgement, Metric
-    # reward_model = GenerativeRewardWrapper(
-    #     generator=llm, 
-    #     tokenizer=tokenizer_g, 
-    #     utility=Metric('rouge'),
-    #     generation_config=generation_config
-    # ).eval()
     reward_model = GenerativeRewardWrapper(
         generator=llm, 
         tokenizer=tokenizer_g, 

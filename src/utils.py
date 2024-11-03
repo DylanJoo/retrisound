@@ -4,9 +4,6 @@ import numpy as np
 from transformers import GenerationConfig
 from prompts import asqa, qampari
 from transformers import AutoTokenizer
-from pyserini.search.lucene import LuceneSearcher
-from pyserini.search.faiss import FaissSearcher
-from _impact_searcher import LuceneImpactSearcher
 
 def init_generation_config(model_opt, tokenizer):
     stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
@@ -224,10 +221,13 @@ def multiple_sample_and_log_probability(
 def load_searcher(path, dense=False, lexical=False, sparse=False):
     searcher = None
     if dense:
+        from pyserini.search.faiss import FaissSearcher
         searcher = FaissSearcher(path, 'facebook/contriever-msmarco')
     if lexical:
+        from _impact_searcher import LuceneImpactSearcher
         searcher = LuceneImpactSearcher(path, 'naver/splade-v3')
     if sparse:
+        from pyserini.search.lucene import LuceneSearcher
         searcher = LuceneSearcher(path)
         searcher.set_bm25(k1=0.9, b=0.4)
     return searcher

@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=1hr-sft
+#SBATCH --job-name=5hr-sft
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -62,9 +62,10 @@ accelerate launch \
     --num_steps 5 \
     --samples 1 \
     --cont_coef 1.0 \
-    --rl_coef 0.001 \
+    --rl_coef 0.0 \
+    --zero_init true \
     --bf16 true \
-    --judgement_file /home/dju/temp/judge-Oct27-0810.txt \
+    --reward_type cumulative \
     --lucene_index_dir /home/dju/indexes/wikipedia_split/splade-v3.psgs_w100.lucene \
     --logging_steps 1
 

@@ -15,58 +15,67 @@ from modeling.utils import multiple_sample_and_log_probability
 from modeling.base_encoder import SEOutput
 from modeling.biencoders.layers import AttentionLayer
 
-class AttentionTopkHead(nn.Module):
+class BERTHead(nn.Module):
     def __init__(self, opt, encoder):
         super().__init__()
-        self.q_encoder = encoder
-        self.gumbel_topk = SubsetOperator(k=10, hard=True)
         config = AutoConfig.from_pretrained(opt.retriever_name_or_path)
         self.attn_layer = AttentionLayer(config)
+        self.q_encoder = encoder
         self.samples = opt.samples
+        if opt.zero_init:
+            for p in self.attn_layer.parameters():
+                torch.nn.init.zeros_(p)
 
     def forward(self, input_ids, attention_mask, q_out=None):
-        ## query hidden
         q_embeds = q_out.last_hidden_state
-
-        ## feedback
         out = self.q_encoder(input_ids, attention_mask)
         f_embeds = out.last_hidden_state
-
-        ## cross-attention: output --> B N_heads Lq Lf --> B Lq Lf
-        attention_scores = self.attn_layer(
+        attention_output = self.attn_layer(
             hidden_states=q_embeds, encoder_hidden_states=f_embeds,
             output_attention_scores=True
-        )[1]
-        attention_scores = attention_scores.mean(1)
+        )
+        attention_scores = attention_output[1].mean(1)
 
-        ## maximum feedback-token including score
         aggregated_scores = torch.max(attention_scores, dim=1).values
-
-        all_logprobs = F.log_softmax(aggregated_scores, dim=-1)
-        probs = all_logprobs.exp()
         logprobs, actions, values = [], [], []
 
-        ## Opt1: sampling
-        # print('\nprob (pos)', (probs>=0.5).sum(-1) / probs.shape[-1])
-        # print('\nprob (neg)', (probs<0.5).sum(-1) / probs.shape[-1])
-        # print('\nprob (max)', probs.max(-1).values)
-        # actions:  [ (B Lf), (B Lf), ...]
-        # values:   [ (B V), (B V), ...]
-        # logprob:  [ (B), (B), ...]
-        actions, values, logprobs = [], [], []
-        for i in range(self.samples):
-            action = self.gumbel_topk(aggregated_scores) # B Lf
-            actions.append(action)
+        # Self token-level to feedback squence distillation
+        mse = torch.nn.MSELoss()
+        pseudo_scores = torch.log( 1+torch.relu(out.logits) ) / (1+q_out.reps.unsqueeze(1))
+        pseudo_scores = pseudo_scores.max(-1).values
+        loss_mse = mse(aggregated_scores, pseudo_scores)
 
-            logprob = (all_logprobs * action).sum(1) # B
+        ## Opt1: sampling
+        probs = torch.sigmoid(aggregated_scores)
+        probs = probs * attention_mask
+        print('\nprob (pos)', (probs>=0.5).sum(-1) / probs.shape[-1])
+        print('\nprob (neg)', (probs<0.5).sum(-1) / probs.shape[-1])
+        dist = torch.distributions.Bernoulli(probs) # B Lf
+        ## actions:  [ (B Lf), (B Lf), ...]
+        ## values:   [ (B V), (B V), ...]
+        ## logprob:  [ (B), (B), ...]
+        for i in range(self.samples):
+            if i == (self.samples - 1): 
+                # put the deterministic sample at the end
+                action = (probs >= 0.5).clone()
+                action = action.type(q_out.logits.dtype)
+            else:
+                action = dist.sample()
+            actions.append(action)
+            logprob = dist.log_prob(action).sum(-1)
             logprobs.append(logprob)
 
-            old_logits = torch.max(q_out.logits, dim=1).values
-            new_logits = torch.max(out.logits * action.unsqueeze(-1), dim=1).values
-            value = torch.log(1 + torch.relu(old_logits + new_logits))
-            values.append(value)
-        return values, logprobs, actions
+            logits = self.q_encoder.model.cls(attention_output[0])
+            value, _ = torch.max(
+                torch.log(1 + torch.relu(logits)) 
+                * attention_mask.unsqueeze(-1), dim=1
+            )
 
+            # old_logits = torch.max(q_out.logits, dim=1).values
+            # new_logits = torch.max(out.logits * action.unsqueeze(-1), dim=1).values
+            values.append(value)
+
+        return values, logprobs, actions, out, loss_mse
 
 class AttentionHead(nn.Module):
     def __init__(self, opt, encoder):
@@ -75,6 +84,9 @@ class AttentionHead(nn.Module):
         self.attn_layer = AttentionLayer(config)
         self.q_encoder = encoder
         self.samples = opt.samples
+        if opt.zero_init:
+            for p in self.attn_layer.parameters():
+                torch.nn.init.zeros_(p)
 
     def forward(self, input_ids, attention_mask, q_out=None):
         ## query hidden
@@ -248,27 +260,6 @@ class SparseAdaptiveEncoders(nn.Module):
         self.q_encoder.model.gradient_checkpointing_enable(**kwargs)
         self.d_encoder.model.gradient_checkpointing_enable(**kwargs)
 
-# deprecated
-class AnsweringHead(nn.Module):
-    def __init__(self, opt, encoder):
-        super().__init__()
-        self.encoder = encoder
-        self.gumbel_topk = SubsetOperator(k=1000, hard=True)
-
-    def forward(self, input_ids, attention_mask, query_rep=None):
-        logits = self.encoder(input_ids, attention_mask).logits
-        all_logprobs = F.log_softmax(logits, dim=-1)  # B L V
-        batch_size, _, vocab_size = logits.size(0), logits.size(-1)
-        selections = self.gumbel_topk(logits.view(-1, vocab_size))         # B L V
-        selections = selections.view(batch_size, -1, vocab_size)
-        logprobs = (all_logprobs * selections).sum(1) # B V
-        values, _ = torch.max(
-            torch.log(1 + torch.relu(logits * selections)) 
-            * attention_mask.unsqueeze(-1), dim=1
-        )
-        return values, logprobs, selections
-
-
 # class RegularizationHead(nn.Module):
 #     def __init__(self, opt, encoder):
 #         super().__init__()
@@ -290,3 +281,58 @@ class AnsweringHead(nn.Module):
 #             values.append(rep * actions_.max(1).values ) 
 #         return values, logprobs, actions
 
+#
+# class AttentionTopkHead(nn.Module):
+#     def __init__(self, opt, encoder):
+#         super().__init__()
+#         self.q_encoder = encoder
+#         self.gumbel_topk = SubsetOperator(k=10, hard=True)
+#         config = AutoConfig.from_pretrained(opt.retriever_name_or_path)
+#         self.attn_layer = AttentionLayer(config)
+#         if opt.zero_init:
+#             for p in self.attn_layer.parameters():
+#                 torch.nn.init.zeros_(p)
+#         self.samples = opt.samples
+#
+#     def forward(self, input_ids, attention_mask, q_out=None):
+#         ## query hidden
+#         q_embeds = q_out.last_hidden_state
+#
+#         ## feedback
+#         out = self.q_encoder(input_ids, attention_mask)
+#         f_embeds = out.last_hidden_state
+#
+#         ## cross-attention: output --> B N_heads Lq Lf --> B Lq Lf
+#         attention_scores = self.attn_layer(
+#             hidden_states=q_embeds, encoder_hidden_states=f_embeds,
+#             output_attention_scores=True
+#         )[1]
+#         attention_scores = attention_scores.mean(1)
+#
+#         ## maximum feedback-token including score
+#         aggregated_scores = torch.max(attention_scores, dim=1).values
+#
+#         all_logprobs = F.log_softmax(aggregated_scores, dim=-1)
+#         probs = all_logprobs.exp()
+#         logprobs, actions, values = [], [], []
+#
+#         ## Opt1: sampling
+#         # print('\nprob (pos)', (probs>=0.5).sum(-1) / probs.shape[-1])
+#         # print('\nprob (neg)', (probs<0.5).sum(-1) / probs.shape[-1])
+#         # print('\nprob (max)', probs.max(-1).values)
+#         # actions:  [ (B Lf), (B Lf), ...]
+#         # values:   [ (B V), (B V), ...]
+#         # logprob:  [ (B), (B), ...]
+#         actions, values, logprobs = [], [], []
+#         for i in range(self.samples):
+#             action = self.gumbel_topk(aggregated_scores) # B Lf
+#             actions.append(action)
+#
+#             logprob = (all_logprobs * action).sum(1) # B
+#             logprobs.append(logprob)
+#
+#             old_logits = torch.max(q_out.logits, dim=1).values
+#             new_logits = torch.max(out.logits * action.unsqueeze(-1), dim=1).values
+#             value = torch.log(1 + torch.relu(old_logits + new_logits))
+#             values.append(value)
+#         return values, logprobs, actions
