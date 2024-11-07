@@ -151,7 +151,7 @@ class Trainer(RewardTrainer):
 
         model.q_encoder.eval()
         model.d_encoder.eval()
-        model.modifier.q_encoder.eval()
+        model.modifier.encoder.eval()
 
         ## collect inputs 
         ### [RL states]: question, candidates, feedback
@@ -188,13 +188,13 @@ class Trainer(RewardTrainer):
                     device=model.device
                 )
                 output = model(**retriever_inputs, prev_out=prev_output, include_n_feedbacks=t)
-                prev_output = output.q_out
+                # prev_output = output.out
 
                 # get rewards over samples
                 # [todo] sampled search to speed up
-                for i in range(output.q_logprobs.size(1)):
-                    query = output.q_reps[:, i, :] # B N V --> B 1 V
-                    logprob = output.q_logprobs[:, i]
+                for i in range(output.logprobs.size(1)):
+                    query = output.reps[:, i, :] # B N V --> B 1 V
+                    logprob = output.logprobs[:, i]
                     reward, candidates, judges = self.compute_loss_reward(
                         query, questions, targets, 
                         cached_judges=judges,
@@ -207,7 +207,7 @@ class Trainer(RewardTrainer):
                 # the expected retrieved candidates 
                 feedback = self.compute_loss_feedback(questions, candidates) 
                 ct_losses.append(output.loss)
-                distill_losses.append(output.loss_d)
+                distill_losses.append(output.loss_sft)
 
             # [NOTE] here we use the last sample as the stored feedback
             for j in range(len(data_indices)):
@@ -218,12 +218,14 @@ class Trainer(RewardTrainer):
                     pids=list(judges[j].keys()),
                     scores=list(judges[j].values())
                 )
-    # def update_candidates(self, idx, pids, scores=None):
 
         rewards = torch.stack(rewards, 1)
         logprobs = torch.stack(logprobs, 1)
         contrastive_loss = torch.stack(ct_losses, 0)
         distill_loss = torch.stack(distill_losses, 0)
+
+        if self.args.reward_type == 'cumulative':
+            rewards = rewards.cumsum(-1)
 
         ## baseline can be the improved one-shot retrieval
         reinforce_loss = (rewards * (-logprobs)).mean()
@@ -248,7 +250,7 @@ class Trainer(RewardTrainer):
         print('\nFeedback: ', feedback[0])
         print('\nAnswer: ', targets[0])
         print('\n\nTop-k terms vs rewards')
-        sample_terms = self.tokenizer.batch_decode(torch.argsort(output.q_reps[0], -1, descending=True)[:, :8])
+        sample_terms = self.tokenizer.batch_decode(torch.argsort(output.reps[0], -1, descending=True)[:, :8])
         sample_rewards = rewards[0].tolist()
         for tt, rr in zip(sample_terms, sample_rewards):
             print(rr, tt)

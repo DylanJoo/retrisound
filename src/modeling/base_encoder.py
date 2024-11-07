@@ -1,17 +1,7 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple
 from transformers import BertModel, AutoModelForMaskedLM
-from transformers.modeling_outputs import BaseModelOutput
-from dataclasses import dataclass
-
-## Learned sparse encoder
-@dataclass
-class SEOutput(BaseModelOutput):
-    reps: torch.FloatTensor = None
-    logits: torch.FloatTensor = None
-    mask: torch.FloatTensor = None
-    last_hidden_state: torch.FloatTensor = None
+from modeling.biencoders.outputs import SparseEncoderOutput, DenseEncoderOutput
 
 def normalize(tensor, eps=1e-9):
     return tensor / (torch.norm(tensor, dim=-1, keepdim=True) + eps)
@@ -52,7 +42,7 @@ class SparseEncoder(nn.Module):
             output_hidden_states=True
         )
 
-        last_hidden_state = model_output["hidden_states"][-1]
+        last_hidden_states = model_output["hidden_states"][-1]
         logits = model_output.logits 
 
         # pooling/aggregation
@@ -71,15 +61,14 @@ class SparseEncoder(nn.Module):
         if self.norm:
             values = normalize(values)
 
-        return SEOutput(reps=values, logits=logits, last_hidden_state=last_hidden_state, mask=attention_mask)
+        return SparseEncoderOutput(
+            reps=values, 
+            logits=logits, 
+            last_hidden_states=last_hidden_states, 
+            mask=attention_mask
+        )
 
 ## Learned dense encoder
-@dataclass
-class EncoderOutput(BaseModelOutput):
-    emb: torch.FloatTensor = None
-    last_hidden_states: torch.FloatTensor = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-
 class Contriever(BertModel):
     def __init__(self, config, add_pooling_layer=False, **kwargs):
         super().__init__(config, add_pooling_layer=add_pooling_layer)
@@ -120,4 +109,7 @@ class Contriever(BertModel):
             emb = last_hidden_states.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
         if self.pooling == 'cls':
             emb = last_hidden_states[:, 0]
-        return EncoderOutput(emb=emb, last_hidden_states=last_hidden_states)
+        return DenseEncoderOutput(
+            emb=emb, 
+            last_hidden_states=last_hidden_states
+        )

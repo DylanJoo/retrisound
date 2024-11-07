@@ -5,22 +5,6 @@ import torch.distributed as dist
 import copy
 import math
 
-import random
-from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, List, Mapping
-from transformers.modeling_outputs import BaseModelOutput
-# from .dist_utils import gather
-# from dist_utils import gather
-
-@dataclass
-class InBatchOutput(BaseModelOutput):
-    qembs: torch.FloatTensor = None
-    loss: torch.FloatTensor = None
-    logits: Optional[torch.FloatTensor] = None
-    all_scores: Optional[torch.FloatTensor] = None
-    ranking: Optional[torch.FloatTensor] = None
-    logs: Optional[Dict[str, torch.FloatTensor]] = None
-
 class RankingValueHead(nn.Module):
     """ estimate the value of entire ranking """
 
@@ -116,7 +100,7 @@ class DenseAdaptiveReranker(nn.Module):
             CELoss = nn.CrossEntropyLoss()
             loss_r = CELoss(rel_scores, labels)
 
-        return InBatchOutput(
+        return DenseEncoderOutput(
             qembs=qembs,
             loss=loss_r,
             logits=logits, # B N_cand H

@@ -41,8 +41,8 @@ def main():
     from modeling import SparseEncoder
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
-    from modeling.biencoders.sparse_new import SparseAdaptiveEncoders, AttentionHead, BERTHead
-    modifier = BERTHead(
+    from modeling.biencoders.sparse_new import SparseAdaptiveEncoders, AttentionHead
+    modifier = AttentionHead(
         model_opt,
         encoder=SparseEncoder(
             model_name_or_path=model_opt.retriever_name_or_path,

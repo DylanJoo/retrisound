@@ -2,18 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
-import copy
-import math
 
 import random
-from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, List, Mapping
-from transformers.modeling_outputs import BaseModelOutput
 from transformers import PreTrainedModel, AutoTokenizer, AutoConfig
+from modeling.biencoders.layers import AttentionLayer
 from modeling.utils import SubsetOperator
 from modeling.utils import multiple_sample_and_log_probability
-from modeling.base_encoder import SEOutput
-from modeling.biencoders.layers import AttentionLayer
 
 class AttentionTopkHead(nn.Module):
     def __init__(self, opt, encoder):
@@ -143,18 +137,6 @@ class AttentionHead(nn.Module):
 
             values.append(value)
         return values, logprobs, actions, q_out
-
-@dataclass
-class EncodersOutput(BaseModelOutput):
-    q_reps: torch.FloatTensor = None
-    q_logprobs: torch.FloatTensor = None
-    q_values: torch.FloatTensor = None
-    q_actions: Optional[torch.FloatTensor] = None
-    q_out: Optional[SEOutput] = None
-    d_reps: torch.FloatTensor = None
-    loss: torch.FloatTensor = None
-    scores: Optional[torch.FloatTensor] = None
-    logs: Optional[Dict[str, torch.FloatTensor]] = None
 
 class SparseAdaptiveEncoders(nn.Module):
     def __init__(

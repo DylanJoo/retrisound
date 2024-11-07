@@ -18,6 +18,7 @@ class ModelOptions:
     max_new_tokens: Optional[int] = field(default=32)
     fusion_type: Optional[str] = field(default='ff')
     zero_init: bool = field(default=False)
+    sft: bool = field(default=False)
     samples: int = field(default=1)
 
 @dataclass

@@ -38,6 +38,7 @@ accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
+    --main_process_port 29501 \
     --deepspeed_config_file configs/zero2_config_accelerate.json \
     sft_train.py \
     --retriever_name_or_path $BASE_RET \
@@ -58,16 +59,16 @@ accelerate launch \
     --generation_batch 2 \
     --n_contexts 5 \
     --n_max_candidates 2 \
-    --n_max_segments 5 \
-    --num_steps 5 \
-    --samples 1 \
-    --cont_coef 1.0 \
-    --rl_coef 0.0 \
-    --zero_init true \
+    --n_max_segments 3 \
+    --num_steps 3 \
+    --samples 5 \
+    --cont_coef 0.0 \
+    --rl_coef 1.0 \
     --bf16 true \
-    --reward_type cumulative \
+    --reward_type irrelevant_pushing \
     --lucene_index_dir /home/dju/indexes/wikipedia_split/splade-v3.psgs_w100.lucene \
     --logging_steps 1
+    # --sft true \
 
 # --train_file /home/dju/datasets/qampari/train_data.jsonl \
 # --retrieval_file /home/dju/datasets/qampari/train_data_bm25-top100.run \

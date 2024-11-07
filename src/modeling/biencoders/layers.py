@@ -14,7 +14,8 @@ class AttentionLayer(BertSelfAttention):
         encoder_attention_mask = None,
         past_key_value = None,
         output_attentions = True,
-        output_attention_scores = False
+        output_attention_scores = False,
+        ignore_value_projection = True
     ):
         mixed_query_layer = self.query(hidden_states)
 
@@ -30,7 +31,8 @@ class AttentionLayer(BertSelfAttention):
             attention_mask = encoder_attention_mask
         elif is_cross_attention:
             key_layer = self.transpose_for_scores(self.key(encoder_hidden_states))
-            value_layer = self.transpose_for_scores(self.value(encoder_hidden_states))
+            value = encoder_hidden_states if ignore_value_projection else self.value(encoder_hidden_states) 
+            value_layer = self.transpose_for_scores(value)
             attention_mask = encoder_attention_mask
         elif past_key_value is not None:
             key_layer = self.transpose_for_scores(self.key(hidden_states))
@@ -85,17 +87,19 @@ class AttentionLayer(BertSelfAttention):
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        # attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        attention_probs = nn.functional.gumbel_softmax(attention_scores, dim=-1)
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = self.dropout(attention_probs)
+        # attention_probs = self.dropout(attention_probs) # remove dropout
 
         # Mask heads if we want to
         if head_mask is not None:
             attention_probs = attention_probs * head_mask
 
         context_layer = torch.matmul(attention_probs, value_layer)
+        # context_layer = torch.multiply(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
