@@ -1,7 +1,7 @@
 #!/bin/sh
 #SBATCH --job-name=debug-5hr-sft
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_titan_v:4
+#SBATCH --gres=gpu:nvidia_titan_xp:4
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

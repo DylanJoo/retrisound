@@ -157,7 +157,7 @@ class Trainer(RewardTrainer):
 
         ### sampling
         ct_losses = []
-        distill_losses = []
+        mr_losses = []
         logprobs = []
         rewards = []
         for t in range(0, self.args.num_steps+1):
@@ -197,7 +197,7 @@ class Trainer(RewardTrainer):
                 # the expected retrieved candidates 
                 feedback = self.compute_loss_feedback(questions, candidates) 
                 ct_losses.append(output.loss_ct)
-                distill_losses.append(output.loss_sft)
+                mr_losses.append(output.loss_mr)
 
             # [NOTE] here we use the last sample as the stored feedback
             for j in range(len(data_indices)):
@@ -207,15 +207,20 @@ class Trainer(RewardTrainer):
         rewards = torch.stack(rewards, 1)
         logprobs = torch.stack(logprobs, 1)
         contrastive_loss = torch.stack(ct_losses, 0)
+        marginrank_loss = torch.stack(mr_losses, 0)
 
         ## baseline can be the improved one-shot retrieval
         reinforce_loss = (rewards * (-logprobs)).mean()
         contrastive_loss = contrastive_loss.mean()
+        marginrank_loss = marginrank_loss.mean()
 
-        loss = (reinforce_loss * self.args.rl_coef) + (contrastive_loss * self.args.ct_coef)
+        loss = (reinforce_loss * self.args.rl_coef) + \
+                (contrastive_loss * self.args.ct_coef) + \
+                (marginrank_loss * self.args.mr_coef)
 
         self.log({"train/reward": rewards.mean().item()})
         self.log({"loss/RL": reinforce_loss.mean().item()})
+        self.log({"loss/CT": contrastive_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
 
         print('---')

@@ -16,13 +16,13 @@ class AttentionHead(nn.Module):
         self.encoder = encoder.eval()
         self.samples = opt.samples
         self.args = opt
-        # if opt.zero_init:
-        #     self.attn_layer.query.weight.data.zero_()
-        #     self.attn_layer.query.bias.data.zero_()
-        #     self.attn_layer.key.weight.data.zero_()
-        #     self.attn_layer.key.bias.data.zero_()
-        #     self.attn_layer.value.weight.data.zero_()
-        #     self.attn_layer.value.bias.data.zero_()
+        if opt.zero_init:
+            self.attn_layer.query.weight.data.zero_()
+            self.attn_layer.query.bias.data.zero_()
+            self.attn_layer.key.weight.data.zero_()
+            self.attn_layer.key.bias.data.zero_()
+            self.attn_layer.value.weight.data.zero_()
+            self.attn_layer.value.bias.data.zero_()
 
     def forward(self, input_ids, attention_mask, q_out, ignore_value_projection=True):
         device = input_ids.device
@@ -63,28 +63,23 @@ class AttentionHead(nn.Module):
             actions = []
             logprobs = [torch.tensor([0.0] * f_logits.size(0)).to(device)] 
             # early fusion (logits)
-            # value, _ = torch.max(torch.log(1 + torch.relu(f_logits)), dim=1)
             value = torch.max(torch.log(1 + torch.relu(q_logits + qf_logits)), dim=1).values
-
-            # late fusion (logits)
             values.append(value)
 
-        # Self token-level to feedback squence distillation
-        loss_sft = torch.tensor([0.0]).to(device)
-        if self.args.sft:
-            # mse
-            m = torch.nn.MSELoss()
-            resid_scores = torch.log(1+torch.relu(qf_logits))
-            pseudo_scores = torch.log(1+torch.relu(f_out.logits))
-            pseudo_scores = pseudo_scores / q_out.reps.unsqueeze(1)
-            loss_sft = m(resid_scores, pseudo_scores)
+        # loss_sft = torch.tensor([0.0]).to(device)
+        # if self.args.sft:
+        #     # mse
+        #     m = torch.nn.MSELoss()
+        #     resid_scores = torch.log(1+torch.relu(qf_logits))
+        #     pseudo_scores = torch.log(1+torch.relu(f_out.logits))
+        #     pseudo_scores = pseudo_scores / q_out.reps.unsqueeze(1)
+        #     loss_sft = m(resid_scores, pseudo_scores)
 
         return AdaptiveHeadOutput(
             actions=actions,
             logprobs=logprobs,
             values=values,
             output=f_out,
-            loss_sft=loss_sft
         )
 
     def sample_actions(self, states, attention_mask=None):
@@ -207,8 +202,8 @@ class SparseAdaptiveEncoders(nn.Module):
             actions=q_actions,
             out=output.output,
             d_reps=d_reps,
-            loss_ct=loss_ct_t + loss_mr, 
-            loss_sft=losses_sft,
+            loss_ct=loss_ct_t,
+            loss_mr=loss_mr, 
             scores=scores, 
             logs={'InfoNCE': loss_ct_t}
         )
