@@ -27,7 +27,7 @@ class DataOptions:
     corpus_file: Optional[str] = field(default=None)
     retrieval_file: Optional[str] = field(default=None)
     judgement_file: Optional[str] = field(default=None)
-    split: Optional[str] = field(default='test')
+    split: Optional[str] = field(default=None)
     depth: Optional[int] = field(default=30)
 
 from trl.trainer.reward_config import RewardConfig

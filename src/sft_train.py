@@ -85,6 +85,7 @@ def main():
 
     train_dataset = PRFDataset(
         dataset_dir=data_opt.train_file, 
+        split=data_opt.split,
         n_max_segments=train_opt.n_max_segments,
         n_max_candidates=train_opt.n_max_candidates,
         retrieval_file=data_opt.retrieval_file,

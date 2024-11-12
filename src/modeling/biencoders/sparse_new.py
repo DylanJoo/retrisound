@@ -63,9 +63,9 @@ class AttentionHead(nn.Module):
             actions = []
             logprobs = [torch.tensor([0.0] * f_logits.size(0)).to(device)] 
             # early fusion (logits)
-            value, _ = torch.max(torch.log(1 + torch.relu(f_logits)), dim=1)
+            # value, _ = torch.max(torch.log(1 + torch.relu(f_logits)), dim=1)
             # value = q_out.reps + torch.max(torch.log(1 + torch.relu(qf_logits)), dim=1).values
-            # value = torch.max(torch.log(1 + torch.relu(qf_logits)), dim=1).values
+            value = torch.max(torch.log(1 + torch.relu(qf_logits)), dim=1).values
             print('nonzero', (value > 0).sum(-1))
 
             # late fusion (logits)
@@ -151,6 +151,8 @@ class SparseAdaptiveEncoders(nn.Module):
             else:
                 p.requires_grad = True
 
+        print(self.modifier)
+
     def forward(self, q_tokens, q_masks, prev_out, d_tokens=None, d_masks=None, **kwargs):
         n_segments = len(q_tokens)
         max_num_steps = kwargs.pop('include_n_feedbacks', n_segments)
@@ -191,7 +193,8 @@ class SparseAdaptiveEncoders(nn.Module):
             scores_t = q_reps[:, -1, :] @ d_reps.view(-1, q_reps.size(-1)).permute(1, 0)
             labels = torch.arange(0, batch_size, dtype=torch.long, device=q_reps.device)
             print('\n')
-            print('qshape', q_reps.shape)
+            print(q_reps[0, 0, :])
+            print(q_reps[0, -1, :])
             print('q0', scores_0[0].softmax(-1).tolist())
             print('qt', scores_t[0].softmax(-1).tolist())
             loss_ct_0 = CELoss(scores_0, labels) 
