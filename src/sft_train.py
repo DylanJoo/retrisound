@@ -44,10 +44,7 @@ def main():
     from modeling.biencoders.sparse_new import SparseAdaptiveEncoders, AttentionHead
     modifier = AttentionHead(
         model_opt,
-        encoder=SparseEncoder(
-            model_name_or_path=model_opt.retriever_name_or_path,
-            output='MLM', agg='max', activation='relu'
-        )
+        encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path)
     ).train()
     ada_retriever = SparseAdaptiveEncoders(
         model_opt,
@@ -96,10 +93,7 @@ def main():
     )
 
     ## data ollator
-    data_collator = PRFCollator(
-        tokenizer_r=tokenizer_r,
-        tokenizer_g=tokenizer_g,
-    )
+    data_collator = PRFCollator(tokenizer_r=tokenizer_r, tokenizer_g=tokenizer_g,)
 
     # [trainer]
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}

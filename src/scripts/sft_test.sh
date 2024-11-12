@@ -30,7 +30,7 @@ echo "$BATCH_SIZE_PER_GPU batch size per GPU"
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
-    --mixed_precision fp16 \
+    --mixed_precision bf16 \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
@@ -38,8 +38,8 @@ accelerate launch \
     sft_train.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
-    --train_file /home/dju/datasets/beir-cellar/dbpedia-entity \
-    --split dev \
+    --train_file /home/dju/datasets/beir-cellar/fiqa \
+    --split train \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 1e-3 \
@@ -58,6 +58,6 @@ accelerate launch \
     --ct_coef 1.0 \
     --rl_coef 0.0 \
     --bf16 true \
-    --lucene_index_dir /home/dju/indexes/beir-cellar/dbpedia-entity.lucene \
+    --lucene_index_dir /home/dju/indexes/beir-cellar/fiqa.lucene \
     --logging_steps 1
     # --attn_implementation flash_attention_2 \

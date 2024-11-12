@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 import numpy as np
 from transformers import GenerationConfig
-from prompts import asqa, qampari
+from prompts.generic import *
 from transformers import AutoTokenizer
 
 def init_generation_config(model_opt, tokenizer):
@@ -38,44 +38,21 @@ def augmentation_response(
     questions, 
     candidates, 
     n_context,
-    rankings=None,
-    dataset_prefix='asqa',
     answers=None,
     independent=False
 ):
-    ## loading dependencies
-    if 'asqa' in dataset_prefix:
-        apply_docs_prompt = asqa.apply_docs_prompt
-        apply_rsp_inst_prompt = asqa.apply_rsp_inst_prompt
-        instruction_prompt = asqa.instruction_prompt
-
-    if 'qampari' in dataset_prefix:
-        apply_docs_prompt = qampari.apply_docs_prompt
-        apply_rsp_inst_prompt = qampari.apply_rsp_inst_prompt_new
-        instruction_prompt = qampari.instruction_prompt_new
-
     # prepare prompts
     prompts = []
     if independent:
         for j in range(len(candidates)):
             d = apply_docs_prompt([candidates[j]], field='text')
-            prompt = apply_rsp_inst_prompt(
-                Q=questions, 
-                D=d,
-                instruction=instruction_prompt,
-                A=answers,
-            )
+            prompt = apply_rsp_inst_prompt(Q=questions, D=d)
             prompts.append(prompt)
     else:
         contexts = [clist[:n_context] for clist in candidates] 
         for i in range(len(questions)):
             D = apply_docs_prompt(contexts[i], field='text')
-            prompt = apply_rsp_inst_prompt(
-                Q=questions[i], 
-                D=D,
-                instruction=instruction_prompt,
-                A=answers[i],
-            )
+            prompt = apply_rsp_inst_prompt(Q=questions[i], D=D)
             prompts.append(prompt)
 
     return prompts
@@ -84,42 +61,13 @@ def augmentation_feedback(
     questions, 
     candidates, 
     n_context, 
-    rankings=None,
-    dataset_prefix='asqa'
 ):
-    # prepare contexts
-    if rankings is not None:
-        assert len(candidates) == rankings.size(0)
-        contexts = []
-        for i in range(len(rankings)):
-            reranked_context = [candidates[i][j] for j in rankings[i]]
-            contexts.append(reranked_context[:n_context])
-    else:
-        contexts = [clist[:n_context] for clist in candidates] 
-
-    ## loading dependencies
-    if 'asqa' in dataset_prefix:
-        apply_docs_prompt = asqa.apply_docs_prompt
-        apply_fbk_inst_prompt = asqa.apply_fbk_inst_prompt
-        fbk_instruction_prompt = asqa.fbk_instruction_prompt
-
-    if 'qampari' in dataset_prefix:
-        apply_docs_prompt = qampari.apply_docs_prompt
-        apply_fbk_inst_prompt = qampari.apply_fbk_inst_prompt
-        fbk_instruction_prompt = qampari.fbk_instruction_prompt
-
     # prepare prompts
     prompts = []
 
     for i in range(len(questions)):
-        ## for answering
-        D = apply_docs_prompt(contexts[i], field='text')
-        prompt = apply_fbk_inst_prompt(
-            Q=questions[i], 
-            D=D,
-            instruction=fbk_instruction_prompt,
-        )
-            # prefix='Follow-up query:\n<q>'
+        D = apply_docs_prompt(candidates[i][:n_context], field='text')
+        prompt = apply_fbk_inst_prompt(Q=questions[i], D=D)
         prompts.append(prompt)
 
     return prompts

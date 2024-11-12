@@ -28,12 +28,12 @@ class AttentionLayer(BertSelfAttention):
             # reuse k,v, cross_attentions
             key_layer = past_key_value[0]
             value_layer = past_key_value[1]
-            attention_mask = encoder_attention_mask
+            # attention_mask = encoder_attention_mask
         elif is_cross_attention:
             key_layer = self.transpose_for_scores(self.key(encoder_hidden_states))
             value = encoder_hidden_states if ignore_value_projection else self.value(encoder_hidden_states) 
             value_layer = self.transpose_for_scores(value)
-            attention_mask = encoder_attention_mask
+            # attention_mask = encoder_attention_mask
         elif past_key_value is not None:
             key_layer = self.transpose_for_scores(self.key(hidden_states))
             value_layer = self.transpose_for_scores(self.value(hidden_states))
@@ -88,13 +88,8 @@ class AttentionLayer(BertSelfAttention):
         #     attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        q_mask = attention_mask.unsqueeze(-1).to(attention_scores.dtype)
-        k_mask = encoder_attention_mask.unsqueeze(-2).to(attention_scores.dtype)
-        cross_mask = torch.matmul(q_mask, k_mask)
-        cross_mask[cross_mask == 0] = torch.tensor(-torch.inf)
-        cross_mask[cross_mask == 1] = 0.0
-        attention_scores = attention_scores + cross_mask
-
+        # cross_mask = encoder_attention_mask[:, None, None, :].to(attention_scores.dtype) # B Lf
+        # attention_scores = attention_scores + cross_mask
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
 
         # attention_probs = nn.functional.gumbel_softmax(attention_scores, dim=-1)
