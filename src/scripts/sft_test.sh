@@ -58,6 +58,7 @@ accelerate launch \
     --ct_coef 1.0 \
     --rl_coef 0.0 \
     --bf16 true \
+    --reward_type irrelevant_pushing \
     --lucene_index_dir /home/dju/indexes/beir-cellar/fiqa.lucene \
     --logging_steps 1
     # --attn_implementation flash_attention_2 \

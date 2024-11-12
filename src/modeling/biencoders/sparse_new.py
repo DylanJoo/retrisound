@@ -13,7 +13,7 @@ class AttentionHead(nn.Module):
         config = AutoConfig.from_pretrained(opt.retriever_name_or_path)
         config.num_attention_heads = 1
         self.attn_layer = AttentionLayer(config)
-        self.encoder = encoder
+        self.encoder = encoder.eval()
         self.samples = opt.samples
         self.args = opt
         # if opt.zero_init:
@@ -164,11 +164,14 @@ class SparseAdaptiveEncoders(nn.Module):
 
         # encode query feedback
         for i in range(0, max_num_steps+1): # [1, ..., max_num_steps]
-            output = self.modifier(q_tokens[i], q_masks[i], prev_out, ignore_value_projection=True) 
-            q_reps += output.values
-            q_logprobs += output.logprobs
-            q_actions += output.actions
-            losses_sft.append(output.loss_sft)
+            if i == 0:
+                pass
+            else:
+                output = self.modifier(q_tokens[i], q_masks[i], prev_out, ignore_value_projection=True) 
+                q_reps += output.values
+                q_logprobs += output.logprobs
+                q_actions += output.actions
+                losses_sft.append(output.loss_sft)
 
         q_reps = torch.stack(q_reps, dim=1) # B N V
         q_logprobs = torch.stack(q_logprobs, dim=1) # B N
@@ -189,19 +192,16 @@ class SparseAdaptiveEncoders(nn.Module):
             d_reps = torch.stack(d_reps, dim=0) # N_cand B H
 
             # B Nq V x B d+ V = B V x B V N --last query x positive context 
-            scores_0 = q_reps[:, 0,  :] @ d_reps.view(-1, q_reps.size(-1)).permute(1, 0)
+            scores_0 = prev_out.reps @ d_reps.view(-1, q_reps.size(-1)).permute(1, 0)
             scores_t = q_reps[:, -1, :] @ d_reps.view(-1, q_reps.size(-1)).permute(1, 0)
             labels = torch.arange(0, batch_size, dtype=torch.long, device=q_reps.device)
-            print('\n')
-            print(q_reps[0, 0, :])
-            print(q_reps[0, -1, :])
             print('q0', scores_0[0].softmax(-1).tolist())
             print('qt', scores_t[0].softmax(-1).tolist())
             loss_ct_0 = CELoss(scores_0, labels) 
             loss_ct_t = CELoss(scores_t, labels) 
 
-            labels = torch.ones(batch_size, dtype=torch.long, device=q_reps.device)
-            loss_mr = MRLoss(scores_t[:, 0], scores_0[:, 0], labels)
+            labels_mr = torch.ones(batch_size, dtype=torch.long, device=q_reps.device)
+            loss_mr = MRLoss(scores_t.diag(), scores_0.diag(), labels_mr)
 
         return SparseAdaptiveEncoderOutput(
             reps=q_reps,

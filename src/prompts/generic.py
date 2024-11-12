@@ -29,8 +29,8 @@ def apply_rsp_inst_prompt(Q, D, A="", prefix="Rating:\n"):
 # template_report = f"{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n"
 prompt_report = "Instruction: Explain the information need of the question in detail. You may find the useful information in the given texts (some of which might be irrelevant). Write the explanation witin 50 words."
 template_report = "{prompt_report}\n\nQuestion: {Q}\n\nTexts:\n{D}\nExplanation:\n"
-# prompt_report = "Instruction: Rewrite the question based on the useful information in given texts (some of which might be irrelevant). Rewrite a new concise question with more clear information need."
-# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nTexts:\n{D}\nRewritten question:\n"
+prompt_report = "Instruction: Rewrite the question with more comprehensive contexts. Some useful context may be found in the given texts (some of which might be irrelevant)."
+template_report = "{prompt_report}\n\nQuestion: {Q}\n\nTexts:\n{D}\nRewritten question:\n"
 
 def apply_fbk_inst_prompt(Q, D, prefix="Report:\n", *kwargs):
     p = template_report.replace('{prompt_report}', prompt_report)

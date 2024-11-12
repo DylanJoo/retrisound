@@ -45,7 +45,8 @@ def main():
     modifier = AttentionHead(
         model_opt,
         encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path)
-    ).train()
+    )
+    modifier.encoder.eval()
     ada_retriever = SparseAdaptiveEncoders(
         model_opt,
         encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path),

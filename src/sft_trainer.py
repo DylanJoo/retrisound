@@ -207,23 +207,20 @@ class Trainer(RewardTrainer):
         rewards = torch.stack(rewards, 1)
         logprobs = torch.stack(logprobs, 1)
         contrastive_loss = torch.stack(ct_losses, 0)
-        distill_loss = torch.stack(distill_losses, 0)
 
         ## baseline can be the improved one-shot retrieval
         reinforce_loss = (rewards * (-logprobs)).mean()
         contrastive_loss = contrastive_loss.mean()
-        distill_loss = distill_loss.mean()
 
         loss = (reinforce_loss * self.args.rl_coef) + (contrastive_loss * self.args.ct_coef)
-        # loss = (reinforce_loss * self.args.rl_coef) + (distill_loss * self.args.cont_coef)
 
         self.log({"train/reward": rewards.mean().item()})
         self.log({"loss/RL": reinforce_loss.mean().item()})
-        self.log({"loss/Distill": distill_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
 
         print('---')
         print('\nquestion: ', questions[0])
+        print('\nDocument +/- ', self.train_dataset[data_indices[0]]['contexts'])
         # print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
         # print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
         print('\nRetrieved doc (q0):', [c['text'][:30] for c in candidates_0[0]])

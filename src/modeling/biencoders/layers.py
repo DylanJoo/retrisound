@@ -88,10 +88,11 @@ class AttentionLayer(BertSelfAttention):
         #     attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        # cross_mask = encoder_attention_mask[:, None, None, :].to(attention_scores.dtype) # B Lf
-        # attention_scores = attention_scores + cross_mask
+        cross_mask = encoder_attention_mask[:, None, None, :].to(attention_scores.dtype) # B Lf
+        cross_mask[cross_mask == 0] = -torch.inf
+        cross_mask[cross_mask == 1] = 0.0
+        attention_scores = attention_scores + cross_mask
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-
         # attention_probs = nn.functional.gumbel_softmax(attention_scores, dim=-1)
 
         # This is actually dropping out entire tokens to attend to, which might
