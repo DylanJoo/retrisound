@@ -230,7 +230,7 @@ class Trainer(RewardTrainer):
         sample_terms = self.tokenizer.batch_decode(torch.argsort(prev_output.reps, -1, descending=True)[0, :8])
         sample_rewards = rewards_0[0].tolist()
         print(sample_terms)
-        print(sample_rewards):
+        print(sample_rewards)
         sample_terms = self.tokenizer.batch_decode(torch.argsort(output.reps[0], -1, descending=True)[:, :8])
         sample_rewards = rewards[0].tolist()
         for tt, rr in zip(sample_terms, sample_rewards):

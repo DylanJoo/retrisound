@@ -17,13 +17,15 @@ cd ~/retrisound/src/
 RETRIEVER=naver/splade-v3
 
 encoded=wikipedia_split/splade-v3.psgs_w100.encoded
-encoded=beir-cellar/fever.encoded
 
 # Generate embeddings
-python -m pyserini.index.lucene \
-  --collection JsonVectorCollection \
-  --input ${INDEX_DIR}/${encoded} \
-  --index ${INDEX_DIR}/${encoded/encoded/lucene} \
-  --generator DefaultLuceneDocumentGenerator \
-  --threads 36 \
-  --impact --pretokenized
+for data in hotpotqa msmarco nfcorpus nq nq-train quora scifact;do
+    encoded=beir-cellar/${data}.encoded
+    python -m pyserini.index.lucene \
+      --collection JsonVectorCollection \
+      --input ${INDEX_DIR}/${encoded} \
+      --index ${INDEX_DIR}/${encoded/encoded/lucene} \
+      --generator DefaultLuceneDocumentGenerator \
+      --threads 36 \
+      --impact --pretokenized
+done

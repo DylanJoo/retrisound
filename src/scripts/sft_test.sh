@@ -30,7 +30,7 @@ echo "$BATCH_SIZE_PER_GPU batch size per GPU"
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
-    --mixed_precision bf16 \
+    --mixed_precision fp16 \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
@@ -42,7 +42,7 @@ accelerate launch \
     --split train \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 1e-4 \
+    --learning_rate 5e-5 \
     --lr_scheduler_type constant \
     --warmup_ratio 0.2 \
     --weight_decay 0. \
@@ -58,7 +58,7 @@ accelerate launch \
     --ct_coef 1.0 \
     --rl_coef 0.0 \
     --bf16 true \
-    --reward_type irrelevant_pushing \
+    --reward_type normal \
     --lucene_index_dir /home/dju/indexes/beir-cellar/fiqa.lucene \
     --logging_steps 1
     # --attn_implementation flash_attention_2 \
