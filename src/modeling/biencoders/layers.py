@@ -82,13 +82,22 @@ class AttentionLayer(BertSelfAttention):
                 attention_scores = attention_scores + relative_position_scores_query + relative_position_scores_key
 
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-            attention_scores = attention_scores + attention_mask
+
+        # if attention_mask is not None:
+        #     # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+        #     attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        # attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-        attention_probs = nn.functional.gumbel_softmax(attention_scores, dim=-1)
+        q_mask = attention_mask.unsqueeze(-1).to(attention_scores.dtype)
+        k_mask = encoder_attention_mask.unsqueeze(-2).to(attention_scores.dtype)
+        cross_mask = torch.matmul(q_mask, k_mask)
+        cross_mask[cross_mask == 0] = torch.tensor(-torch.inf)
+        cross_mask[cross_mask == 1] = 0.0
+        attention_scores = attention_scores + cross_mask
+
+        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+
+        # attention_probs = nn.functional.gumbel_softmax(attention_scores, dim=-1)
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.

@@ -42,6 +42,7 @@ class SparseAdaptiveEncoderOutput(BaseModelOutput):
     out: Optional[SparseEncoderOutput] = None
     d_reps: torch.FloatTensor = None
     loss: torch.FloatTensor = None
+    loss_ct: torch.FloatTensor = None
     loss_sft: torch.FloatTensor = None
     scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None

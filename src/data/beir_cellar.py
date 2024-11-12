@@ -1,3 +1,4 @@
+import random
 import datetime
 import torch
 import numpy as np
@@ -14,6 +15,7 @@ from transformers.tokenization_utils_base import (
 import sys
 
 from beir.datasets.data_loader import GenericDataLoader
+from .utils import load_corpus_file
 
 class PRFDataset(Dataset):
 
@@ -22,7 +24,7 @@ class PRFDataset(Dataset):
         dataset_dir, 
         split='test',
         n_max_segments=10, # n_max_feedback
-        n_max_candidates=10,
+        n_max_candidates=2,
         retrieval_file=None,
         judgement_file=None,
         quick_test=None,
@@ -32,14 +34,24 @@ class PRFDataset(Dataset):
         if ('nq' in dataset_dir) and (split == 'train'):
             dataset_dir = dataset_dir.replace('nq', 'nq-train')
 
-        self.corpus, self.queries, self.qrels = GenericDataLoader(data_folder=dataset_dir).load(split=split)
+        corpus, self.queries, self.qrels = GenericDataLoader(data_folder=dataset_dir).load(split=split)
+
+        if quick_test is not None:
+            self.corpus = defaultdict(lambda: {'text': "this is a testing doc.", 'title': "this is a testing title."})
+            self.corpus.update(corpus)
+        else:
+            self.corpus = corpus
+
         self.split = split
         if split != 'test':
             self.length = len(self.queries)
             self.ids = list(self.queries.keys())
+            self.corpus_ids = list(self.corpus.keys())
         else:
             self.length = len(self.corpus)
             self.ids = list(self.corpus.keys())
+            self.corpus_ids = list(self.corpus.keys())
+            self.queries = self.get_random_crop()
 
         ## additional attributes 
         self.answer = [None] * self.length
@@ -54,9 +66,9 @@ class PRFDataset(Dataset):
 
         ## load prerun judgements
         self.judgements = {}
-        for qid in self.queries:
-            self.judgements[qid] = defaultdict(int)
-        # self._load_judgement(judgement_file)
+        for id in self.ids:
+            self.judgements[id] = defaultdict(int)
+        self._load_judgement(judgement_file)
 
     def _load_judgement(self, file):
         file = (file or f'/home/dju/temp/judge-{datetime.datetime.now().strftime("%b%d-%I%m")}.txt')
@@ -64,11 +76,14 @@ class PRFDataset(Dataset):
         try:
             with open(file, 'r') as f:
                 for line in tqdm(f):
-                    qid, psgid, judge = line.strip().split()[:3]
-                    self.judgements[qid][psgid] = judge
+                    id, psgid, judge = line.strip().split()[:3]
+                    self.judgements[id][psgid] = judge
         except:
             with open(file, 'w') as f:
-                f.write("qid\tpid\tj\tinfo\n")
+                f.write("id\tpid\tj\tinfo\n")
+
+    def __len__(self):
+        return self.length
 
     def add_feedback(self, idx, fbk):
         try:
@@ -84,41 +99,49 @@ class PRFDataset(Dataset):
         with open(self.judgement_file, 'a') as f:
             for pid in judgements:
                 j = judgements[pid]
-                # in memory
-                self.judgements[qid][pid] = j
-                # to file
+                self.judgements[id][pid] = j
                 if j == 0:
-                    f.write(f"{qid}\t{pid}\t{j}\t{info}\n")
+                    f.write(f"{id}\t{pid}\t{j}\t{info}\n")
+                else:
+                    f.write(f"{id}\t{pid}\t{j}\n")
 
-    def random_permute(self):
-        pass
+    def get_random_crop(self):
+        crops = {}
+        for id, passage in self.corpus.items():
+            passage = passage['text'].split('. ')
+            random.shuffle(passage)
+            n = 1 + len(passage) // 2
+            crops[id] = ". ".join(passage[:n])
+        return crops
 
     def __getitem__(self, idx):
         id = self.ids[idx]
 
+        n = self.n_feedbacks[idx]
         if self.split == 'test':
-            n = self.n_feedbacks
-            query = self.corpus[id] if n==0 else self.feedbacks[idx][n] # here maybe needs perturbation
+            query = self.queries[id] if n==0 else self.feedbacks[idx][n-1] # here maybe needs perturbation
             positives = self.corpus[id]
         else:
             query = self.queries[id]
-            true_positive_ids = list(self.qrels[id].keys()), 1)
+            true_positive_ids = list(self.qrels[id].keys())
             positive_id = random.sample(true_positive_ids, 1)[0]
             positives = self.corpus[positive_id]
 
         try:
-            negative_id = random.sample([k for k, v in self.judgements[qid].items() if v <= 1], 1)[0]
+            negative_id = random.sample([k for k, v in self.judgements[id].items() if v == 0], 1)[0]
+            negatives = self.corpus[negative_id]
         except:
-            print('no negative docs found, use random negative')
-        negatives = self.corpus[negative_id]
+            # print('no negative docs found, use random negative')
+            negative_id = random.sample(self.corpus_ids, 1)[0]
+            negatives = self.corpus[negative_id]
 
         # outputs
         return {'index': idx,
                 'query': query,
                 'feedbacks': self.feedbacks[idx],
-                'answers': self.answers[idx],
-                'positives': positives, 
-                'negatives': negatives}
+                'n_feedbacks': n, 
+                'answers': self.answer[idx],
+                'contexts': [positives] + [negatives],}
 
 @dataclass
 class PRFCollator(DefaultDataCollator):
@@ -177,12 +200,14 @@ class PRFCollator(DefaultDataCollator):
         # self.tokenizer_r.pad_token = original_pad_token
 
         # Document # positive + (negative if it has)
-        candidate_size = 1 if min([f['n_feedbacks'] for f in features])==0 else 2
+        candidate_size = len(features[0]['contexts'])
         batch_r['d_tokens'] = []
         batch_r['d_masks'] = []
-        for ctx in range(candidate_size):
+
+        for i in range(candidate_size):
             candidate = self.tokenizer_r.batch_encode_plus(
-                [f"{features[b]['positives']['title']} {features[b]['positives']['text']}" for b in range(batch_size)],
+                [f"{features[b]['contexts'][i]['title']} {features[b]['contexts'][i]['text']}" for \
+                        b in range(batch_size)],
                 add_special_tokens=True,
                 max_length=self.max_src_length,
                 truncation=self.truncation,

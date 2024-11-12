@@ -5,7 +5,7 @@ import torch.distributed as dist
 
 from transformers import AutoConfig
 from modeling.biencoders.layers import AttentionLayer
-from modeling.biencoders.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
+from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
 
 class AttentionHead(nn.Module):
     def __init__(self, opt, encoder):
@@ -16,54 +16,70 @@ class AttentionHead(nn.Module):
         self.encoder = encoder
         self.samples = opt.samples
         self.args = opt
+        # if opt.zero_init:
+        #     self.attn_layer.query.weight.data.zero_()
+        #     self.attn_layer.query.bias.data.zero_()
+        #     self.attn_layer.key.weight.data.zero_()
+        #     self.attn_layer.key.bias.data.zero_()
+        #     self.attn_layer.value.weight.data.zero_()
+        #     self.attn_layer.value.bias.data.zero_()
 
-    def forward(self, input_ids, attention_mask, q_out):
+    def forward(self, input_ids, attention_mask, q_out, ignore_value_projection=True):
+        device = input_ids.device
         f_out = self.encoder(input_ids, attention_mask)
 
         ## query and feedback vectors
-        q_embeds = q_out.last_hidden_states
-        f_embeds = f_out.last_hidden_states
         q_logits = q_out.logits
         f_logits = f_out.logits
 
         ## Policy model: cross-attention
         attn_out = self.attn_layer(
-            hidden_states=q_embeds, 
-            encoder_hidden_states=f_embeds,
-            output_attention_scores=True
+            hidden_states=q_out.last_hidden_states, 
+            attention_mask=q_out.mask,
+            encoder_hidden_states=f_out.last_hidden_states,
+            encoder_attention_mask=f_out.mask,
+            output_attention_scores=True,
+            ignore_value_projection=ignore_value_projection
         )
         # B Lf Lq H  
+        if self.attn_layer.num_attention_heads == 1:
+            qf_attentions = attn_out[1].squeeze(1)
+        else:
+            qf_attentions = attn_out[1].max(1).values
         qf_embeds = attn_out[0] 
         qf_logits = self.encoder.model.cls(qf_embeds)
-        # B Lq Lf
-        attention_scores = attn_out[1].squeeze(1)
 
         ## transform into probability of actions 
         values = []
-        actions, logprobs = self.sample_actions(states=attention_scores, attention_mask=attention_mask)
+        if self.samples > 1:
+            actions, logprobs = self.sample_actions(states=qf_attentions, attention_mask=attention_mask)
 
-        ## convert actions into values
-        for action in actions:
-            value = action.max(1).values.unsqueeze(-1) * f_logits
-            value, _ = torch.max(torch.log(1 + torch.relu(value)), dim=1)
-            # value = (value + q_out.reps) / 2
+            for action in actions:
+                # deterministic
+                value, _ = torch.max(torch.log(1 + torch.relu(q_out.logits + qf_logits)), dim=1)
+                # sampled
+                values.append(value)
+        else:
+            actions = []
+            logprobs = [torch.tensor([0.0]).to(device)] 
+            # early fusion (logits)
+            # value, _ = torch.max(torch.log(1 + torch.relu(f_logits)), dim=1)
+            # value = q_out.reps + torch.max(torch.log(1 + torch.relu(qf_logits)), dim=1).values
+            value = torch.max(torch.log(1 + torch.relu(qf_logits)), dim=1).values
+            print('nonzero', (value > 0).sum(-1))
+
+            # late fusion (logits)
             values.append(value)
 
         # Self token-level to feedback squence distillation
-        loss_sft = torch.tensor([0.0])
+        loss_sft = torch.tensor([0.0]).to(device)
         if self.args.sft:
             # mse
             m = torch.nn.MSELoss()
-            # B Lf V / B 1 V
-            pseudo_scores = torch.log(
-                (1+torch.relu(f_out.logits)) / (1+torch.relu(q_out.logits).max(1).values.unsqueeze(1))
-            )
-            pseudo_scores = pseudo_scores.mean(-1)
-            # loss_sft = m(selections, pseudo_scores)
-
-            # ce
-            # m = torch.nn.CrossEntropyLoss()
-            loss_sft = m(actions[-1].view(-1), (pseudo_scores > 0).long().view(-1).to(selections.device) )
+            resid_scores = torch.log(1+torch.relu(qf_logits))
+            pseudo_scores = torch.log(1+torch.relu(f_out.logits))
+            pseudo_scores = pseudo_scores / q_out.reps.unsqueeze(1)
+            loss_sft = m(resid_scores, pseudo_scores)
 
         return AdaptiveHeadOutput(
             actions=actions,
@@ -80,14 +96,10 @@ class AttentionHead(nn.Module):
 
         for i in range(self.samples):
             if i == (self.samples - 1): 
-                print(states.argmax(-1)[0])
                 action = torch.zeros_like(states).scatter_(2, states.argmax(-1).unsqueeze(-1), 1.)
                 action = action.type(states.dtype)
             else:
                 action = m.sample()
-
-            # if attention_mask is not None:
-            #     action = action * attention_mask.unsqueeze(1)
 
             actions.append(action)
             logprob = m.log_prob(action).sum(-1)
@@ -128,7 +140,6 @@ class SparseAdaptiveEncoders(nn.Module):
         self.opt = opt
         
         # modeling
-        self.q_encoder = encoder
         self.d_encoder = encoder
         self.modifier = modifier
         self.tau = opt.tau
@@ -150,8 +161,8 @@ class SparseAdaptiveEncoders(nn.Module):
         q_actions = []
 
         # encode query feedback
-        for i in range(1, max_num_steps+1): # [1, ..., max_num_steps]
-            output = self.modifier(q_tokens[i], q_masks[i], prev_out)
+        for i in range(0, max_num_steps+1): # [1, ..., max_num_steps]
+            output = self.modifier(q_tokens[i], q_masks[i], prev_out, ignore_value_projection=True) 
             q_reps += output.values
             q_logprobs += output.logprobs
             q_actions += output.actions
@@ -162,22 +173,31 @@ class SparseAdaptiveEncoders(nn.Module):
         losses_sft = torch.stack(losses_sft, dim=0).mean()
 
         # loss calculation
-        scores, loss_r = None, 0.0
+        scores, loss_ct = None, 0.0
         CELoss = nn.CrossEntropyLoss()
+        MRLoss = nn.MarginRankingLoss()
 
         # encode document if using contrastive signals
         d_reps = []
-        if (d_tokens is not None):
+        if d_tokens is not None:
             n_candidates = min(self.n_candidates, len(d_tokens))
             for i in range(n_candidates):
                 d_rep = self.d_encoder(d_tokens[i], d_masks[i]).reps # B H
                 d_reps.append(d_rep)
-            d_reps = torch.stack(d_reps, dim=1) # B N_cand H
+            d_reps = torch.stack(d_reps, dim=0) # N_cand B H
 
-            # B Nq V x B d+ V = B Nq V x B d- V
-            scores = (q_reps[:, -1, :]/self.tau) @ (d_reps[:, 0, :]).T # last query x positive context 
+            # B Nq V x B d+ V = B V x B V N --last query x positive context 
+            scores_0 = q_reps[:, 0,  :] @ d_reps.view(-1, q_reps.size(-1)).permute(1, 0)
+            scores_t = q_reps[:, -1, :] @ d_reps.view(-1, q_reps.size(-1)).permute(1, 0)
             labels = torch.arange(0, batch_size, dtype=torch.long, device=q_reps.device)
-            loss_r = CELoss(scores, labels) # first query and document
+            print('\n')
+            print('q0', scores_0[0].softmax(-1).tolist())
+            print('qt', scores_t[0].softmax(-1).tolist())
+            loss_ct_0 = CELoss(scores_0, labels) 
+            loss_ct_t = CELoss(scores_t, labels) 
+
+            labels = torch.ones(batch_size, dtype=torch.long, device=q_reps.device)
+            loss_mr = MRLoss(scores_t[:, 0], scores_0[:, 0], labels)
 
         return SparseAdaptiveEncoderOutput(
             reps=q_reps,
@@ -185,74 +205,11 @@ class SparseAdaptiveEncoders(nn.Module):
             actions=q_actions,
             out=output.output,
             d_reps=d_reps,
-            loss=loss_r,
+            loss_ct=loss_ct_t + loss_mr, 
             loss_sft=losses_sft,
             scores=scores, 
-            logs={'InfoNCE': loss_r}
+            logs={'InfoNCE': loss_ct_t}
         )
 
     def gradient_checkpointing_enable(self, **kwargs):
-        self.q_encoder.model.gradient_checkpointing_enable(**kwargs)
         self.d_encoder.model.gradient_checkpointing_enable(**kwargs)
-
-# class BERTHead(nn.Module):
-#     def __init__(self, opt, encoder):
-#         super().__init__()
-#         config = AutoConfig.from_pretrained(opt.retriever_name_or_path)
-#         self.attn_layer = AttentionLayer(config)
-#         self.q_encoder = encoder
-#         self.samples = opt.samples
-#         if opt.zero_init:
-#             for p in self.attn_layer.parameters():
-#                 torch.nn.init.zeros_(p)
-#
-#     def forward(self, input_ids, attention_mask, q_out=None):
-#         q_embeds = q_out.last_hidden_state
-#         out = self.q_encoder(input_ids, attention_mask)
-#         f_embeds = out.last_hidden_state
-#         attention_output = self.attn_layer(
-#             hidden_states=q_embeds, encoder_hidden_states=f_embeds,
-#             output_attention_scores=True
-#         )
-#         attention_scores = attention_output[1].mean(1)
-#
-#         aggregated_scores = torch.max(attention_scores, dim=1).values
-#         logprobs, actions, values = [], [], []
-#
-#         # Self token-level to feedback squence distillation
-#         mse = torch.nn.MSELoss()
-#         pseudo_scores = torch.log( 1+torch.relu(out.logits) ) / (1+q_out.reps.unsqueeze(1))
-#         pseudo_scores = pseudo_scores.max(-1).values
-#         loss_mse = mse(aggregated_scores, pseudo_scores)
-#
-#         ## Opt1: sampling
-#         probs = torch.sigmoid(aggregated_scores)
-#         probs = probs * attention_mask
-#         print('\nprob (pos)', (probs>=0.5).sum(-1) / probs.shape[-1])
-#         print('\nprob (neg)', (probs<0.5).sum(-1) / probs.shape[-1])
-#         dist = torch.distributions.Bernoulli(probs) # B Lf
-#         ## actions:  [ (B Lf), (B Lf), ...]
-#         ## values:   [ (B V), (B V), ...]
-#         ## logprob:  [ (B), (B), ...]
-#         for i in range(self.samples):
-#             if i == (self.samples - 1): 
-#                 # put the deterministic sample at the end
-#                 action = (probs >= 0.5).clone()
-#                 action = action.type(q_out.logits.dtype)
-#             else:
-#                 action = dist.sample()
-#             actions.append(action)
-#             logprob = dist.log_prob(action).sum(-1)
-#             logprobs.append(logprob)
-#
-#             logits = self.q_encoder.model.cls(attention_output[0])
-#             value, _ = torch.max(
-#                 torch.log(1 + torch.relu(logits)) 
-#                 * attention_mask.unsqueeze(-1), dim=1
-#             )
-#
-#             # old_logits = torch.max(q_out.logits, dim=1).values
-#             # new_logits = torch.max(out.logits * action.unsqueeze(-1), dim=1).values
-#             values.append(value)
-#
-#         return values, logprobs, actions, out, loss_mse

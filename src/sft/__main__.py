@@ -84,26 +84,31 @@ def main():
 
     # [Data]
     train_opt.dataset_prefix = data_opt.train_file.lower()
-    from data.beir_cellar import PRFDataset, PRFCollator
+    if 'qampari' in train_opt.dataset_prefix:
+        from data.qampari import ContextQADataset, ContextQACollator
+    elif 'asqa' in train_opt.dataset_prefix:
+        from data.asqa import ContextQADataset, ContextQACollator
 
-    train_dataset = PRFDataset(
-        dataset_dir=data_opt.train_file, 
+    train_dataset = ContextQADataset(
+        data_file=data_opt.train_file, 
         n_max_segments=train_opt.n_max_segments,
-        n_max_candidates=train_opt.n_max_candidates,
+        depth=data_opt.depth,
+        corpus_file=data_opt.corpus_file,
         retrieval_file=data_opt.retrieval_file,
         judgement_file=data_opt.judgement_file,
         quick_test=train_opt.quick_test,
+        half_with_bottom=train_opt.half_with_bottom
     )
 
     ## data ollator
-    data_collator = PRFCollator(
+    data_collator = ContextQACollator(
         tokenizer_r=tokenizer_r,
         tokenizer_g=tokenizer_g,
     )
 
     # [trainer]
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from sft_trainer import Trainer
+    from sft.sft_trainer import Trainer
     trainer = Trainer(
         args=train_opt,
         reward_model=reward_model,

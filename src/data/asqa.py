@@ -91,11 +91,11 @@ class ContextQADataset(Dataset):
         try:
             with open(file, 'r') as f:
                 for line in tqdm(f):
-                    qid, psgid, judge = line.strip().split()[:3]
-                    self.judgements[qid][psgid] = judge
+                    id, psgid, judge = line.strip().split()[:3]
+                    self.judgements[id][psgid] = judge
         except:
             with open(file, 'w') as f:
-                f.write("qid\tpid\tj\tinfo\n")
+                f.write("id\tpid\tj\tinfo\n")
 
     def _load_corpus(self, dir):
         from multiprocessing import Pool
@@ -114,27 +114,25 @@ class ContextQADataset(Dataset):
     def __len__(self):
         return len(self.questions)
 
-    def add_feedback(self, idx, act):
+    def add_feedback(self, idx, fbk):
         try:
             i = self.feedbacks[idx].index("") # empty strings
-            self.feedbacks[idx][i] = act
+            self.feedbacks[idx][i] = fbk
             self.n_feedbacks[idx] += 1
         except: # means it's full
-            self.feedbacks[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
+            self.feedbacks[idx] = [fbk] + ["" for _ in range(self.n_max_segments-1)] 
             self.n_feedbacks[idx] = 1
 
     def add_judgements(self, idx, judgements, info=None):
-        qid = self.qids[idx]
+        id = self.ids[idx]
         with open(self.judgement_file, 'a') as f:
             for pid in judgements:
                 j = judgements[pid]
                 # in memory
-                self.judgements[qid][pid] = j
+                self.judgements[id][pid] = j
                 # to file
-                if info is not None:
-                    f.write(f"{qid}\t{pid}\t{j}\t{info}\n")
-                else:
-                    f.write(f"{qid}\t{pid}\t{j}\n")
+                if j == 0:
+                    f.write(f"{id}\t{pid}\t{j}\t{info}\n")
 
     def update_candidates(self, idx, pids, scores=None):
         qid = self.qids[idx]

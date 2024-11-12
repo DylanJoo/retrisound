@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import BertModel, AutoModelForMaskedLM
-from modeling.biencoders.outputs import SparseEncoderOutput, DenseEncoderOutput
+from modeling.outputs import SparseEncoderOutput, DenseEncoderOutput
 
 def normalize(tensor, eps=1e-9):
     return tensor / (torch.norm(tensor, dim=-1, keepdim=True) + eps)

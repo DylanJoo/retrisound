@@ -7,7 +7,7 @@ from transformers import AutoTokenizer
 from collections import defaultdict
 import sys
 from datasets import Dataset
-from base_encoder import SparseEncoder
+from modeling.base_encoder import SparseEncoder
 
 def batch_iterator(
     iterable, 
@@ -61,6 +61,36 @@ def generate_vocab_vector(
 
     return [sort_dict(weight, quantization_factor, minimum) for i, weight in weights.items()]
 
+def batch_inference(args, dataset, shard=0):
+    output_dir = os.path.dirname(args.collection_output)
+    os.makedirs(output_dir, exist_ok=True)
+
+    with open(f'{args.collection_output}_{shard}', 'w') as fout:
+        vectors = []
+        data_iterator = batch_iterator(dataset, args.batch_size, False)
+
+        for batch in tqdm(data_iterator, total=len(dataset)//args.batch_size+1):
+            batch_vectors = generate_vocab_vector(
+                    docs=batch['contents'], 
+                    encoder=model,
+                    minimum=args.minimum,
+                    device=args.device,
+                    max_length=args.max_length,
+                    quantization_factor=args.quantization_factor
+            )
+            vectors += batch_vectors
+
+            # collection and re-dump the collections
+            n = len(batch['id'])
+            for i in range(n):
+                example = {
+                    "id": batch['id'][i],
+                    "contents": batch['contents'][i],
+                    "title": batch['title'][i],
+                    "vector": batch_vectors[i]
+                }
+                fout.write(json.dumps(example, ensure_ascii=False)+'\n')
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", type=str)
@@ -87,42 +117,25 @@ if __name__ == '__main__':
     reverse_voc = {v: k for k, v in tokenizer.vocab.items()}
 
     # load data
-    collection = []
     with open(args.collection, 'r') as f:
+        i = 0
+        collection = []
         for line in tqdm(f):
             item = json.loads(line.strip())
+            if 'contents' not in item.keys(): # for beir-cellar
+                item['id'] = item['_id']
+                item['contents'] = item['title'] + " " + item['text']
             collection.append(item)
-    dataset = Dataset.from_list(collection)
-    del collection 
-    print(dataset)
 
-    # preparing batch 
-    vectors = []
-    data_iterator = batch_iterator(dataset, args.batch_size, False)
+            if len(collection) >= 1000000:
+                dataset = Dataset.from_list(collection)
+                print(dataset)
+                batch_inference(args, dataset, i)
 
-    output_dir = os.path.dirname(args.collection_output)
-    os.makedirs(output_dir, exist_ok=True)
-    with open(args.collection_output, 'w') as fout:
-        for batch in tqdm(data_iterator, total=len(dataset)//args.batch_size+1):
-            batch_vectors = generate_vocab_vector(
-                    docs=batch['contents'], 
-                    encoder=model,
-                    minimum=args.minimum,
-                    device=args.device,
-                    max_length=args.max_length,
-                    quantization_factor=args.quantization_factor
-            )
-            vectors += batch_vectors
+                i += 1
+                collection = []
 
-            # collection and re-dump the collections
-            n = len(batch['id'])
-            for i in range(n):
-                example = {
-                    "id": batch['id'][i],
-                    "contents": batch['contents'][i],
-                    "title": batch['title'][i],
-                    "vector": batch_vectors[i]
-                }
-                fout.write(json.dumps(example, ensure_ascii=False)+'\n')
-
-
+    # finish the rest of collections
+    if len(collection) > 0:
+        dataset = Dataset.from_list(collection)
+        batch_inference(args, dataset, i)
