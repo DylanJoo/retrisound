@@ -64,9 +64,7 @@ class AttentionHead(nn.Module):
             logprobs = [torch.tensor([0.0] * f_logits.size(0)).to(device)] 
             # early fusion (logits)
             # value, _ = torch.max(torch.log(1 + torch.relu(f_logits)), dim=1)
-            # value = q_out.reps + torch.max(torch.log(1 + torch.relu(qf_logits)), dim=1).values
-            value = torch.max(torch.log(1 + torch.relu(qf_logits)), dim=1).values
-            print('nonzero', (value > 0).sum(-1))
+            value = torch.max(torch.log(1 + torch.relu(q_logits + qf_logits)), dim=1).values
 
             # late fusion (logits)
             values.append(value)

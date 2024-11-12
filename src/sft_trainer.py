@@ -168,7 +168,7 @@ class Trainer(RewardTrainer):
                     retriever_inputs['q_tokens'][0], 
                     retriever_inputs['q_masks'][0]
                 )
-                _, candidates_0, judges = self.compute_loss_reward(
+                rewards_0, candidates_0, judges = self.compute_loss_reward(
                     prev_output.reps, questions, cached_judges=judges
                 )
                 feedback = self.compute_loss_feedback(questions, candidates_0)
@@ -227,6 +227,10 @@ class Trainer(RewardTrainer):
         print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
         print('\nFeedback: ', self.train_dataset.feedbacks[data_indices[0]])
         print('\n\nTop-k terms vs rewards')
+        sample_terms = self.tokenizer.batch_decode(torch.argsort(prev_output.reps, -1, descending=True)[0, :8])
+        sample_rewards = rewards_0[0].tolist()
+        print(sample_terms)
+        print(sample_rewards):
         sample_terms = self.tokenizer.batch_decode(torch.argsort(output.reps[0], -1, descending=True)[:, :8])
         sample_rewards = rewards[0].tolist()
         for tt, rr in zip(sample_terms, sample_rewards):

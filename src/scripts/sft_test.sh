@@ -42,8 +42,8 @@ accelerate launch \
     --split train \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 1e-3 \
-    --lr_scheduler_type linear \
+    --learning_rate 1e-4 \
+    --lr_scheduler_type constant \
     --warmup_ratio 0.2 \
     --weight_decay 0. \
     --num_train_epochs 1 \
