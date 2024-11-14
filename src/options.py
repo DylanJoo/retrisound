@@ -52,6 +52,7 @@ class ReinforceOptions(RewardConfig):
     generation_batch: Optional[int] = field(default=None)
     report_to: Optional[str] = field(default="wandb")
     ct_coef: Optional[float] = field(default=0.0)
+    mr_coef: Optional[float] = field(default=0.0)
     rl_coef: Optional[float] = field(default=1.0)
     half_with_bottom: bool = field(default=False)
     reward_type: str = field(default='normal')

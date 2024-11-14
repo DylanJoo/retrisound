@@ -1,108 +1,122 @@
 import torch
-from copy import deepcopy
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from base_encoder import Contriever
-from dataclasses import dataclass, field
-from typing import Optional, Union, Tuple, Literal
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions import Categorical
+from base_encoder import SparseEncoder
 
-tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-model = Contriever.from_pretrained('bert-base-uncased', pooling='mean')
-model_cls = Contriever.from_pretrained('OpenMatch/cocodr-base-msmarco', pooling='cls')
+class SparseRetrievalRL(nn.Module):
+    def __init__(self, opt, sampling_method='gumbel'):
+        super().__init__()
+        self.sampling_method = sampling_method
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.encoder = SparseEncoder(opt.generator_name_or_path)
+        config = self.encoder.model.config
+        
+        # Policy network to learn discretization
+        self.policy_net = nn.Sequential(
+            nn.Linear(config.hidden_size, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, 2)  # Binary decision for each dimension
+        )
+        
+        # Value network for critic
+        self.value_net = nn.Sequential(
+            nn.Linear(config.hidden_size, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, 1)
+        )
+        
+    def sample_policy(self, logits, temperature=1.0):
+        if self.sampling_method == 'gumbel':
+            # Gumbel-Softmax sampling
+            policy = F.gumbel_softmax(logits, tau=temperature, hard=True)
+            log_probs = F.log_softmax(logits, dim=-1)
+            return policy, log_probs
+        
+        elif self.sampling_method == 'categorical':
+            # Explicit categorical sampling
+            probs = F.softmax(logits / temperature, dim=-1)
+            m = Categorical(probs)
+            actions = m.sample()
+            log_probs = m.log_prob(actions)
+            
+            # Convert to one-hot for sparse representation
+            policy = F.one_hot(actions, num_classes=2).float()
+            return policy, log_probs
+    
+    def forward(self, inputs, temperature=1.0):
+        # Get embeddings and encode
+        q_out = self.encoder(inputs['q_tokens'], inputs['q_masks'])
+        pooled = torch.max(q_out.rep, dim=1)[0]
+        
+        # Get policy logits and value estimate
+        policy_logits = self.policy_net(q_out.last_hidden_states)
+        value = self.value_net(pooled)
+        
+        # Sample actions using specified method
+        policy, log_probs = self.sample_policy(policy_logits, temperature)
+        
+        # Create sparse representation
+        if self.sampling_method == 'categorical':
+            sparse_repr = pooled * (policy == 1).float()
+        else:
+            sparse_repr = pooled * policy[:, :, 1].unsqueeze(-1)
+        
+        return {
+            'sparse_repr': sparse_repr,
+            'policy_logits': policy_logits,
+            'log_probs': log_probs,
+            'value': value,
+            'policy': policy
+        }
+    
+    def compute_loss(self, batch, rewards, temperature=1.0, gamma=0.99):
+        outputs = self.forward(batch, temperature)
+        
+        if self.sampling_method == 'gumbel':
+            # Gumbel-Softmax version
+            log_probs = outputs['log_probs']
+            selected_log_probs = log_probs[:, :, 1].mean(dim=1)  # For active dimensions
+        else:
+            # Categorical sampling version
+            selected_log_probs = outputs['log_probs']
+        
+        advantages = rewards - outputs['value'].detach()
+        policy_loss = -(selected_log_probs * advantages).mean()
+        
+        # Value loss
+        value_loss = F.mse_loss(outputs['value'], rewards)
+        
+        # Sparsity regularization
+        sparsity_penalty = torch.norm(outputs['sparse_repr'], p=1)
+        
+        # Entropy regularization for exploration
+        if self.sampling_method == 'categorical':
+            probs = F.softmax(outputs['policy_logits'], dim=-1)
+            entropy = -(probs * probs.log()).sum(dim=-1).mean()
+            entropy_bonus = 0.01 * entropy
+        else:
+            entropy_bonus = 0
+        
+        total_loss = policy_loss + 0.5 * value_loss + 0.1 * sparsity_penalty - entropy_bonus
+        
+        return total_loss, {
+            'policy_loss': policy_loss.item(),
+            'value_loss': value_loss.item(),
+            'sparsity': sparsity_penalty.item(),
+            'entropy': entropy_bonus.item() if self.sampling_method == 'categorical' else 0
+        }
 
-@dataclass
-class ModelOptions:
-    retriever_name_or_path: Optional[str] = field(default="facebook/contriever")
-    add_pooling_layer: Optional[bool] = field(default=False)
-    num_mem_tokens: Optional[int] = field(default=1)
-    num_budget: Optional[int] = field(default=5)
-    tau: Optional[float] = field(default=1.0)
 
-def test_q_encoder():
-    from base_encoder import Contriever
-    q_encoder = Contriever.from_pretrained('OpenMatch/cocodr-base-msmarco', pooling='cls')
-    input = tokenizer(['hello world', 'apple'], return_tensors='pt', padding=True)
-    out = q_encoder(**input)
-    return q_encoder
-
-def test_crossencoder():
-    from crossencoder import ValueCrossEncoder
-    from transformers import BertForSequenceClassification
-
-    model_opt = ModelOptions()
-    cross_encoder = BertForSequenceClassification.from_pretrained("bert-base-uncased")
-
-    crossencoder = ValueCrossEncoder(
-        model_opt,
-        cross_encoder=cross_encoder,
-        d_encoder=model,
-        n_max_candidates=10
-    )
-
-    outputs = test_biencder()
-    out = crossencoder.forward(
-        qembs=outputs.qembs, 
-        dembs=outputs.dembs
-    )
-    print(out)
-
-def test_biencder():
-    # modification
-    from modifier import FeedbackQueryModifier
-    model_opt = ModelOptions()
-    encoder = test_q_encoder()
-
-    biencoder = FeedbackQueryModifier(
-        model_opt, 
-        qr_encoder=encoder, 
-        qf_encoder=encoder,
-        d_encoder=encoder,
-    )
-
-    # query
-    input = tokenizer(['apple', 'apple2', 'apple3'], return_tensors='pt', padding=True)
-    input2 = tokenizer(['banana', 'banana2', 'banana3'], return_tensors='pt', padding=True)
-    input3 = tokenizer(['watermelon', 'watermelon2', 'watermelon3'], return_tensors='pt', padding=True)
-    input4 = tokenizer(['aaa', 'bbb', 'ccc'], return_tensors='pt', padding=True)
-
-    # documents
-    d_input = tokenizer(
-        ['apple', 'apple and banana are good', 'apple and banana and watermelon are good'], 
-        return_tensors='pt', 
-        padding=True
-    )
-
-    # B = 3 | N = 4 | M = 2
-    out = biencoder.forward(
-        q_tokens=[input['input_ids'], input2['input_ids'], input3['input_ids'], input4['input_ids']],
-        q_masks=[input['attention_mask'], input2['attention_mask'], input3['attention_mask'], input4['input_ids']],
-        d_tokens=[d_input['input_ids'], d_input['input_ids']],
-        d_masks=[d_input['attention_mask'], d_input['attention_mask']],
-    )
-    print(out.qembs.shape)
-    print(out.dembs.shape)
-    print(out.scores.shape)
-    print(out.loss.shape)
-    return out
-
-def test_reward_wrapper():
-    tokenizer = AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v0.6')
-    model = AutoModelForCausalLM.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v0.6')
-
-    from reward_wrapper import GenerativeRewardWrapper, Metric
-    reward_value_model = GenerativeRewardWrapper(
-        generator=model,
-        tokenizer=tokenizer,
-        utility=Metric('rouge'),
-        generation_config=model.generation_config
-    )
-
-    q, r, r_texts = reward_value_model._inference(
-        ['hello, I am', 'the reason i am here is']
-    )
-
-    rw = reward_value_model.get_rewards(["app", "Thank you"], r_texts)
-    print(rw)
-
-# test_biencder()
-test_crossencoder()
-# test_reward_wrapper()
+# Example usage
+def train_step(model, optimizer, batch, rewards):
+    optimizer.zero_grad()
+    
+    # Anneal temperature over training
+    temperature = max(0.5, 1.0 - epoch * 0.1)  # Example annealing schedule
+    
+    loss, metrics = model.compute_loss(batch, rewards, temperature)
+    loss.backward()
+    optimizer.step()
+    
+    return metrics

@@ -76,7 +76,7 @@ def main():
     reward_model = GenerativeRewardWrapper(
         generator=llm, 
         tokenizer=tokenizer_g, 
-        utility=Judgement(list(range(6))),
+        utility=Judgement(list(range(6)), counting=False),
         generation_config=generation_config
     ).eval()
 

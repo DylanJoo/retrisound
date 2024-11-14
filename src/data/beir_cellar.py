@@ -100,7 +100,7 @@ class PRFDataset(Dataset):
             for pid in judgements:
                 j = judgements[pid]
                 self.judgements[id][pid] = j
-                if j == 0:
+                if (j == 0) or (j == 5):
                     f.write(f"{id}\t{pid}\t{j}\t{info}\n")
                 else:
                     f.write(f"{id}\t{pid}\t{j}\n")
@@ -186,17 +186,17 @@ class PRFCollator(DefaultDataCollator):
         ## Feedbacks as followup query
         # original_pad_token = self.tokenizer_r.pad_token
         for seg_num in range(n_max_segments): 
-            batch_action_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
-            action_q = self.tokenizer_r.batch_encode_plus(
-                batch_action_q,
+            batch_feedback_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
+            feedback_q = self.tokenizer_r.batch_encode_plus(
+                [fbk for fbk in batch_feedback_q],
                 add_special_tokens=True,
                 max_length=self.max_src_length,
                 truncation=self.truncation,
                 padding=self.padding,
                 return_tensors='pt'
             ).to(device)
-            batch_r['q_tokens'].append(action_q['input_ids'])
-            batch_r['q_masks'].append(action_q['attention_mask'])
+            batch_r['q_tokens'].append(feedback_q['input_ids'])
+            batch_r['q_masks'].append(feedback_q['attention_mask'])
         # self.tokenizer_r.pad_token = original_pad_token
 
         # Document # positive + (negative if it has)
@@ -206,8 +206,8 @@ class PRFCollator(DefaultDataCollator):
 
         for i in range(candidate_size):
             candidate = self.tokenizer_r.batch_encode_plus(
-                [f"{features[b]['contexts'][i]['title']} {features[b]['contexts'][i]['text']}" for \
-                        b in range(batch_size)],
+                [f"{features[b]['contexts'][i]['title']} {features[b]['contexts'][i]['text']}".strip() 
+                    for b in range(batch_size)],
                 add_special_tokens=True,
                 max_length=self.max_src_length,
                 truncation=self.truncation,

@@ -5,7 +5,7 @@ import torch.distributed as dist
 
 import random
 from transformers import PreTrainedModel, AutoTokenizer, AutoConfig
-from modeling.biencoders.layers import AttentionLayer
+from modeling.biencoders.layers import CrossAttentionLayer
 from modeling.utils import SubsetOperator
 from modeling.utils import multiple_sample_and_log_probability
 
@@ -15,7 +15,7 @@ class AttentionTopkHead(nn.Module):
         self.q_encoder = encoder
         self.gumbel_topk = SubsetOperator(k=10, hard=True)
         config = AutoConfig.from_pretrained(opt.retriever_name_or_path)
-        self.attn_layer = AttentionLayer(config)
+        self.attn_layer = CrossAttentionLayer(config)
         self.samples = opt.samples
 
     def forward(self, input_ids, attention_mask, q_out=None):
@@ -66,7 +66,7 @@ class AttentionHead(nn.Module):
     def __init__(self, opt, encoder):
         super().__init__()
         config = AutoConfig.from_pretrained(opt.retriever_name_or_path)
-        self.attn_layer = AttentionLayer(config)
+        self.attn_layer = CrossAttentionLayer(config)
         self.q_encoder = encoder
         self.samples = opt.samples
 

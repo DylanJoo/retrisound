@@ -177,7 +177,6 @@ class Trainer(RewardTrainer):
                     [self.train_dataset[idx] for idx in data_indices],
                     device=model.device
                 )
-                # print(self.tokenizer.batch_decode(retriever_inputs['q_tokens'][t]))
                 output = model(**retriever_inputs, prev_out=prev_output, include_n_feedbacks=t)
 
                 # get rewards over samples
@@ -221,7 +220,7 @@ class Trainer(RewardTrainer):
         self.log({"train/reward": rewards.mean().item()})
         self.log({"loss/RL": reinforce_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
-        self.log({"loss/CT": contrastive_loss.mean().item()})
+        self.log({"loss/MR": marginrank_loss.mean().item()})
 
         print('---')
         print('\nquestion: ', questions[0])

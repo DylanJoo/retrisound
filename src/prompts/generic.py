@@ -15,8 +15,10 @@ def apply_docs_prompt(doc_items, field='text'):
     return p
 
 # prompts for response/reward
-prompt_rating = "Instruction: Determine whether the provided context is relevant to the given query? Rate the context with on a scale from 0 to 5 according to the guideline below. Do not write anything except the rating. Rate 0 if the context is empty."
-guideline = "Guideline:\n- 5: The context is highly relevant, complete, and accurate to the query.\n- 4: The context is mostly relevant and complete but may have minor gaps or inaccuracies to the query.\n- 3: The context is partially relevant and complete, with noticeable gaps or inaccuracies to the query.\n- 2: The context has limited relevance and completeness, with significant gaps or inaccuracies to the query.\n- 1: The context is minimally relevant or complete, with substantial shortcomings to the query.\n- 0: The context is not relevant or complete at all."
+# prompt_rating = "Instruction: Determine whether the provided context is relevant to the given query? Rate the context with on a scale from 0 to 5 according to the guideline below. Do not write anything except the rating. Rate 0 if the context is empty."
+# guideline = "Guideline:\n- 5: The context is highly relevant, complete, and accurate to the query.\n- 4: The context is mostly relevant and complete but may have minor gaps or inaccuracies to the query.\n- 3: The context is partially relevant and complete, with noticeable gaps or inaccuracies to the query.\n- 2: The context has limited relevance and completeness, with significant gaps or inaccuracies to the query.\n- 1: The context is minimally relevant or complete, with substantial shortcomings to the query.\n- 0: The context is not relevant or complete at all."
+prompt_rating = "Determine whether the provided context is relevant to the given query? Rate the context with on a scale of 0 or 1 according to the guideline below. Do not write anything except the rating. Rate 0 if the context is empty."
+guideline = "Guideline:\n- 1: The context is highly relevant, complete, and accurate to the query.\n- 0: The context is not relevant or incomplete, with substantial shortcomings to the query."
 template_rating = "{prompt_rating}\n\n{guideline}\n\nQuery: {Q}\n\nContext: {D}\n\nRating:\n"
 
 def apply_rsp_inst_prompt(Q, D, A="", prefix="Rating:\n"):
@@ -25,12 +27,13 @@ def apply_rsp_inst_prompt(Q, D, A="", prefix="Rating:\n"):
     return p
 
 # prompts for feedback
-# prompt_report = "Instruction: Write an accurate, engaging, and concise report for the given topic using only the provided search results (some of which might be irrelevant) and cite them properly. Use an unbiased and journalistic tone. Always cite for any factual claim. When citing several search results, use [1][2][3]. Cite at least one document and at most three documents in each sentence. If multiple documents support the sentence, only cite a minimum sufficient subset of the documents."
-# template_report = f"{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n"
-prompt_report = "Instruction: Explain the information need of the question in detail. You may find the useful information in the given texts (some of which might be irrelevant). Write the explanation witin 50 words."
-template_report = "{prompt_report}\n\nQuestion: {Q}\n\nTexts:\n{D}\nExplanation:\n"
-prompt_report = "Instruction: Rewrite the question with more comprehensive contexts. Some useful context may be found in the given texts (some of which might be irrelevant)."
-template_report = "{prompt_report}\n\nQuestion: {Q}\n\nTexts:\n{D}\nRewritten question:\n"
+prompt_report = "Instruction: Write an accurate, engaging, and concise report for the given topic. Use only the provided search results (some of which might be irrelevant) and cite them properly. Always cite for any factual claim. Cite at least one document and at most three documents in each sentence."
+template_report = "{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n"
+# prompt_report = "Instruction: Explain the information need of the question in detail. You may find the useful information in the given texts (some of which might be irrelevant). Write the explanation witin 50 words."
+# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nTexts:\n{D}\nExplanation:\n"
+# prompt_report = "Rewrite the question with more comprehensive contexts. Some useful context may be found in the given texts (some of which might be irrelevant)."
+# template_report = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
+# template_report = "Please write a 50 words passage to answer the question. Some of the relevant contexts are also provided for your reference (some of which might be irrelevant)\n\nContext: {D}\nQuestion: {Q}\nPassage:\n"
 
 def apply_fbk_inst_prompt(Q, D, prefix="Report:\n", *kwargs):
     p = template_report.replace('{prompt_report}', prompt_report)
