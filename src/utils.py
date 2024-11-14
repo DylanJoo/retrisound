@@ -14,8 +14,8 @@ def init_generation_config(model_opt, tokenizer):
     ))  
     return GenerationConfig(
         do_sample=True,
-        temperature=0.5,
-        top_p=1.0,
+        temperature=0.2,
+        top_p=0.1,
         max_new_tokens=model_opt.max_new_tokens,
         num_return_sequences=1,
         eos_token_id=stop_token_ids

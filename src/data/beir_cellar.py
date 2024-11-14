@@ -35,6 +35,7 @@ class PRFDataset(Dataset):
             dataset_dir = dataset_dir.replace('nq', 'nq-train')
 
         corpus, self.queries, self.qrels = GenericDataLoader(data_folder=dataset_dir).load(split=split)
+        self.dataset_dir = dataset_dir
 
         if quick_test is not None:
             self.corpus = defaultdict(lambda: {'text': "this is a testing doc.", 'title': "this is a testing title."})
@@ -52,9 +53,6 @@ class PRFDataset(Dataset):
             self.ids = list(self.corpus.keys())
             self.corpus_ids = list(self.corpus.keys())
             self.queries = self.get_random_crop()
-
-        ## additional attributes 
-        self.answer = [None] * self.length
 
         ## training attributes
         self.n_max_segments = n_max_segments
@@ -99,11 +97,13 @@ class PRFDataset(Dataset):
         with open(self.judgement_file, 'a') as f:
             for pid in judgements:
                 j = judgements[pid]
+
+                if pid in self.qrels[id]:
+                    judgements[pid] = 1
+                    continue
+
                 self.judgements[id][pid] = j
-                if (j == 0) or (j == 5):
-                    f.write(f"{id}\t{pid}\t{j}\t{info}\n")
-                else:
-                    f.write(f"{id}\t{pid}\t{j}\n")
+                f.write(f"{id}\t{pid}\t{j}\t{info}\n")
 
     def get_random_crop(self):
         crops = {}
@@ -140,7 +140,6 @@ class PRFDataset(Dataset):
                 'query': query,
                 'feedbacks': self.feedbacks[idx],
                 'n_feedbacks': n, 
-                'answers': self.answer[idx],
                 'contexts': [positives] + [negatives],}
 
 @dataclass

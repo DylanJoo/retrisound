@@ -12,7 +12,7 @@ class AttentionHead(nn.Module):
         super().__init__()
         config = AutoConfig.from_pretrained(opt.retriever_name_or_path)
         config.num_attention_heads = 1
-        config.num_layers = 4
+        config.num_layers = 1
 
         self.config = config
         self.attn_layer = nn.ModuleList([CrossAttentionLayer(config) for _ in range(config.num_layers)])
@@ -149,7 +149,45 @@ class SparseAdaptiveEncoders(nn.Module):
             else:
                 p.requires_grad = True
 
-        print(self.modifier)
+    # @torch.no_grad()
+    # def batch_encode(self, query_texts, batch_size=32, num_steps=1):
+    #     from transformers import AutoTokenizer
+    #     tokenizer = AutoTokenizer.from_pretrained(self.opt.retriever_name_or_path)
+    #     query_vectors = []
+    #     feedback_texts = []
+    #     query_prf_vectors = []
+    #     response = []
+    #
+    #     for j in range(0, len(prompt), batch_size):
+    #         for t in num_steps:
+    #             if t == 0:
+    #                 tokenized = tokenizer(
+    #                     query_texts[j:(j+batch_size)], 
+    #                     add_special_tokens=True,
+    #                     max_length=self.max_src_length,
+    #                     truncation=self.truncation,
+    #                     padding=self.padding,
+    #                     return_tensors='pt'
+    #                 ).to(self.encoder.device)
+    #                 prev_out = self.encoder(**tokenized['input_ids'])
+    #                 query_vectors += prev_out.reps
+    #
+    #             else:
+    #                 tokenized = tokenizer(
+    #                     feedbacks_texts[j:(j+batch_size)], 
+    #                     add_special_tokens=True,
+    #                     max_length=self.max_src_length,
+    #                     truncation=self.truncation,
+    #                     padding=self.padding,
+    #                     return_tensors='pt'
+    #                 ).to(self.encoder.device)
+    #                 output = self.modifier(
+    #                     tokenized['input_ids'], 
+    #                     tokenized['attention_mask'],
+    #                     prev_out=prev_out
+    #                 )
+    #
+    #             # generate feedbacks
 
     def forward(self, q_tokens, q_masks, prev_out, d_tokens=None, d_masks=None, **kwargs):
         n_segments = len(q_tokens)
@@ -197,10 +235,10 @@ class SparseAdaptiveEncoders(nn.Module):
             print('qt', scores_t.softmax(-1).diag().tolist())
             loss_ct = CELoss(scores_t, labels) 
 
-            labels_mr = torch.ones(batch_size, dtype=torch.long, device=q_reps.device)
-            margin_0 = self.sig_relu(prev_out.reps) * d_reps_T - self.sig_relu(prev_out.reps) * d_reps_F
-            margin_t = self.sig_relu(q_reps[:, -1]) * d_reps_T - self.sig_relu(q_reps[:, -1]) * d_reps_F
-            loss_mr = MRLoss(margin_t, margin_0, labels_mr)
+            margin_0 = prev_out.reps * d_reps_T - prev_out.reps * d_reps_F
+            margin_t = q_reps[:, -1] * d_reps_T - q_reps[:, -1] * d_reps_F
+            labels_mr = torch.ones(margin_0.shape, dtype=torch.long, device=q_reps.device)
+            loss_mr = MRLoss(margin_t, margin_0, labels_mr).sum()
 
         return SparseAdaptiveEncoderOutput(
             reps=q_reps,
