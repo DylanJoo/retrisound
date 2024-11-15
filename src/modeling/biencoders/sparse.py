@@ -15,7 +15,7 @@ class AttentionHead(nn.Module):
         config.num_layers = 1
 
         self.config = config
-        self.attn_layer = nn.ModuleList([CrossAttentionLayer(config) for _ in range(config.num_layers)])
+        self.crossattention = nn.ModuleList([CrossAttentionLayer(config) for _ in range(config.num_layers)])
         self.encoder = encoder.eval()
         self.samples = opt.samples
         self.args = opt
@@ -31,7 +31,7 @@ class AttentionHead(nn.Module):
         ## Policy model: cross-attention
         for i, attn_layer in enumerate(self.attn_layer):
             if i == 0:
-                attn_out = attn_layer(
+                attn_out = crossattention(
                     hidden_states=q_out.last_hidden_states, 
                     attention_mask=q_out.mask,
                     encoder_hidden_states=f_out.last_hidden_states,
@@ -40,7 +40,7 @@ class AttentionHead(nn.Module):
                     ignore_value_projection=ignore_value_projection
                 )
             else:
-                attn_out = attn_layer(
+                attn_out = crossattention(
                     hidden_states=attn_out[0], 
                     attention_mask=q_out.mask,
                     encoder_hidden_states=f_out.last_hidden_states,
@@ -135,10 +135,10 @@ class SparseAdaptiveEncoders(nn.Module):
         self.tau = opt.tau
         self.n_candidates = n_candidates
         for n, p in self.named_parameters():
-            if 'encoder' in n:
-                p.requires_grad = False
-            else:
+            if 'crossattention' in n:
                 p.requires_grad = True
+            else:
+                p.requires_grad = False
 
     def forward(self, q_tokens, q_masks, prev_out, d_tokens=None, d_masks=None, **kwargs):
         n_segments = len(q_tokens)

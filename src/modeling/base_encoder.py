@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import BertModel, AutoModelForMaskedLM
+from transformers import BertModel, BertForMaskedLM, AutoConfig
 from modeling.outputs import SparseEncoderOutput, DenseEncoderOutput
 
 def normalize(tensor, eps=1e-9):
@@ -9,7 +9,16 @@ def normalize(tensor, eps=1e-9):
 class SparseEncoder(nn.Module):
     def __init__(self, model_name_or_path, **kwargs):
         super().__init__()
-        self.model = AutoModelForMaskedLM.from_pretrained(model_name_or_path)
+        if kwargs.pop('cross_attention', False):
+            config = AutoConfig.from_pretrained(model_name_or_path, 
+                is_decoder=True, 
+                add_cross_attention=True,
+                num_hidden_layers=2
+            )
+        else:
+            config = None
+
+        self.model = BertForMaskedLM.from_pretrained(model_name_or_path, config=config)
         self.output = kwargs.pop('output', 'MLM')
         self.agg = kwargs.pop('agg', 'max')
         self.activation = kwargs.pop('activation', 'relu') 
@@ -65,6 +74,7 @@ class SparseEncoder(nn.Module):
             reps=values, 
             logits=logits, 
             last_hidden_states=last_hidden_states, 
+            all_hidden_states=model_output["hidden_states"], 
             mask=attention_mask
         )
 

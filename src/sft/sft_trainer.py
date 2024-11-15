@@ -53,8 +53,8 @@ class Trainer(RewardTrainer):
         self, 
         query, 
         questions,
-        answers,
         cached_judges=None, # this mean each passage will be judged indepedently
+        truth=None,
         reward_type='normal'
     ):
         hits = self.searcher.batch_search(
@@ -73,6 +73,7 @@ class Trainer(RewardTrainer):
         candidates = []
         for i, key in enumerate(hits):
 
+            pids = [h.docid for h in hits[key]]
             candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
             candidates.append(candidate)
 
@@ -83,32 +84,35 @@ class Trainer(RewardTrainer):
                 questions=questions[i], 
                 candidates=new_candidates,
                 n_context=self.args.n_contexts,
-                rankings=None,
-                dataset_prefix=self.args.dataset_prefix,
-                answers=answers[i],
                 independent=(cached_judges is not None)
             )
-            response = []
-            for j in range(0, len(prompt), gen_batch):
-                _, _, b_response = self.reward_model._inference(prompt[j:j+gen_batch])
-                response += b_response
-            new_reward = self.reward_model.get_rewards(response, answers[i])
 
-            # update
-            for pid, judge in zip(new_pids, new_reward):
-                cached_judges[i][pid] = judge.item()
+            if reward_type == 'truth':
+                rank_positive = max( [1/(r+1) for r, c in enumerate(pids) if c in truth[i].keys()] + [0] )
+                reward = torch.tensor(float(rank_positive)).to(query.device)
 
-            if reward_type == 'cumulative':
-                new_pids = new_pids if len(new_pids) > 0 else [-1]
-                reward = torch.tensor([float(cached_judges[i][pid]) for pid in new_pids]).mean().to(query.device)
-            elif reward_type == 'irrelevant_pushing':
-                score = [float(cached_judges[i][h.docid]) for h in hits[key]] + [0]
-                rank_negative = 1 - 1 / ( (score.index(0)+1) )
-                reward = torch.tensor(float(rank_negative)).to(query.device)
             else:
-                reward = torch.tensor([float(cached_judges[i][h.docid]) for h in hits[key]]).mean().to(query.device)
-            rewards.append(reward)
+                # generation
+                response = []
+                for j in range(0, len(prompt), gen_batch):
+                    _, _, b_response = self.reward_model._inference(prompt[j:j+gen_batch])
+                    response += b_response
+                new_reward = self.reward_model.get_rewards(response)
+                # update
+                for pid, judge in zip(new_pids, new_reward):
+                    cached_judges[i][pid] = judge.item()
 
+                if reward_type == 'cumulative':
+                    new_pids = new_pids if len(new_pids) > 0 else [-1]
+                    reward = torch.tensor([float(cached_judges[i][pid]) for pid in new_pids]).mean().to(query.device)
+                elif reward_type == 'irrelevant_pushing':
+                    score = [float(cached_judges[i][h.docid]) for h in hits[key]] + [0]
+                    rank_negative = 1 - 1 / ( (score.index(0)+1) )
+                    reward = torch.tensor(float(rank_negative)).to(query.device)
+                else:
+                    reward = torch.tensor([float(cached_judges[i][h.docid]) for h in hits[key]]).mean().to(query.device)
+
+            rewards.append(reward)
         rewards = torch.stack(rewards, 0) # B 1 
 
         if cached_judges is None:
@@ -131,8 +135,6 @@ class Trainer(RewardTrainer):
             questions=questions, 
             candidates=contexts, 
             n_context=self.args.n_contexts,
-            rankings=None,
-            dataset_prefix=self.args.dataset_prefix
         )
         feedback = []
         for i in range(0, len(prompt), gen_batch):
@@ -149,46 +151,42 @@ class Trainer(RewardTrainer):
         return_outputs=False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
 
-        model.q_encoder.eval()
         model.d_encoder.eval()
         model.modifier.encoder.eval()
 
         ## collect inputs 
         ### [RL states]: question, candidates, feedback
-        questions = inputs["questions"]
-        targets = inputs["targets"]
+        questions = inputs["query"]
         data_indices = inputs["index"] # for the next iteration
-        qids = [self.train_dataset.qids[idx] for idx in data_indices]
-        judges = [self.train_dataset.judgements[qid] for qid in qids]
+        ids = [self.train_dataset.ids[idx] for idx in data_indices]
+        truth = [self.train_dataset.qrels[id] for id in ids]
+        judges = [self.train_dataset.judgements[id] for id in ids]
 
         batch_size, step_size = len(questions), self.args.num_steps
 
         ### sampling
         ct_losses = []
-        distill_losses = []
+        mr_losses = []
         logprobs = []
         rewards = []
         for t in range(0, self.args.num_steps+1):
 
             if t == 0:
                 retriever_inputs = inputs["inputs_for_retriever"]
-                bm25_candidates = inputs["candidates"]
-                prev_output = model.q_encoder(
+                prev_output = model.d_encoder(
                     retriever_inputs['q_tokens'][0], 
                     retriever_inputs['q_masks'][0]
                 )
                 rewards_0, candidates_0, judges = self.compute_loss_reward(
-                    prev_output.reps, questions, targets, cached_judges=judges
+                    prev_output.reps, questions, cached_judges=judges, truth=truth
                 )
                 feedback = self.compute_loss_feedback(questions, candidates_0)
             else: 
-                del retriever_inputs
                 retriever_inputs = self.data_collator.get_inputs_for_retriever(
                     [self.train_dataset[idx] for idx in data_indices],
                     device=model.device
                 )
                 output = model(**retriever_inputs, prev_out=prev_output, include_n_feedbacks=t)
-                # prev_output = output.out
 
                 # get rewards over samples
                 # [todo] sampled search to speed up
@@ -196,8 +194,9 @@ class Trainer(RewardTrainer):
                     query = output.reps[:, i, :] # B N V --> B 1 V
                     logprob = output.logprobs[:, i]
                     reward, candidates, judges = self.compute_loss_reward(
-                        query, questions, targets, 
+                        query, questions, 
                         cached_judges=judges,
+                        truth=truth,
                         reward_type=self.args.reward_type
                     )
                     reward = reward.view(-1).to(model.device)
@@ -206,51 +205,47 @@ class Trainer(RewardTrainer):
 
                 # the expected retrieved candidates 
                 feedback = self.compute_loss_feedback(questions, candidates) 
-                ct_losses.append(output.loss)
-                distill_losses.append(output.loss_sft)
+                ct_losses.append(output.loss_ct)
+                mr_losses.append(output.loss_mr)
 
             # [NOTE] here we use the last sample as the stored feedback
             for j in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[j], feedback[j])
-                # self.train_dataset.add_judgements(data_indices[j], judges[j], info=questions[j])
-                self.train_dataset.update_candidates(
-                    idx=data_indices[j],
-                    pids=list(judges[j].keys()),
-                    scores=list(judges[j].values())
-                )
+                self.train_dataset.add_judgements(data_indices[j], judges[j], info=questions[j])
 
         rewards = torch.stack(rewards, 1)
         logprobs = torch.stack(logprobs, 1)
         contrastive_loss = torch.stack(ct_losses, 0)
-        distill_loss = torch.stack(distill_losses, 0)
-
-        if self.args.reward_type == 'cumulative':
-            rewards = rewards.cumsum(-1)
+        marginrank_loss = torch.stack(mr_losses, 0)
 
         ## baseline can be the improved one-shot retrieval
         reinforce_loss = (rewards * (-logprobs)).mean()
         contrastive_loss = contrastive_loss.mean()
-        distill_loss = distill_loss.mean()
+        marginrank_loss = marginrank_loss.mean()
 
-        # loss = (reinforce_loss * self.args.rl_coef) + \
-        #         (contrastive_loss * self.args.cont_coef) + \
-        #         (distill_loss * self.args.cont_coef)
-        loss = (reinforce_loss * self.args.rl_coef) + (distill_loss * self.args.cont_coef)
-
+        loss = (reinforce_loss * self.args.rl_coef) + \
+                (contrastive_loss * self.args.ct_coef) + \
+                (marginrank_loss * self.args.mr_coef)
 
         self.log({"train/reward": rewards.mean().item()})
         self.log({"loss/RL": reinforce_loss.mean().item()})
-        self.log({"loss/Distill": distill_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
+        self.log({"loss/MR": marginrank_loss.mean().item()})
 
         print('---')
         print('\nquestion: ', questions[0])
-        print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
-        print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
-        print('\nFeedback: ', feedback[0])
-        print('\nAnswer: ', targets[0])
+        print('\nDocument +/- ', self.train_dataset[data_indices[0]]['contexts'])
+        # print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
+        # print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
+        print('\nRetrieved doc (q0):', [c['text'][:30] for c in candidates_0[0]])
+        print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
+        print('\nFeedback: ', self.train_dataset.feedbacks[data_indices[0]])
         print('\n\nTop-k terms vs rewards')
-        sample_terms = self.tokenizer.batch_decode(torch.argsort(output.reps[0], -1, descending=True)[:, :8])
+        sample_terms = self.tokenizer.batch_decode(torch.argsort(prev_output.reps, -1, descending=True)[0, :15])
+        sample_rewards = rewards_0[0].tolist()
+        print(sample_terms)
+        print(sample_rewards)
+        sample_terms = self.tokenizer.batch_decode(torch.argsort(output.reps[0], -1, descending=True)[:, :15])
         sample_rewards = rewards[0].tolist()
         for tt, rr in zip(sample_terms, sample_rewards):
             print(rr, tt)

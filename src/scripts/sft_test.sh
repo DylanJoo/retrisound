@@ -37,7 +37,7 @@ accelerate launch \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
     --deepspeed_config_file configs/zero2_config_accelerate.json \
-    sft_train.py \
+    train.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --train_file /home/dju/datasets/beir-cellar/fiqa \

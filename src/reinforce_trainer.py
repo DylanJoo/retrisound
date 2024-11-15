@@ -53,7 +53,6 @@ class Trainer(RewardTrainer):
         self, 
         query, 
         questions,
-        answers,
         cached_judges=None, # this mean each passage will be judged indepedently
         reward_type='normal'
     ):
@@ -73,6 +72,7 @@ class Trainer(RewardTrainer):
         candidates = []
         for i, key in enumerate(hits):
 
+            pids = [h.docid for h in hits[key]]
             candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
             candidates.append(candidate)
 
@@ -83,9 +83,6 @@ class Trainer(RewardTrainer):
                 questions=questions[i], 
                 candidates=new_candidates,
                 n_context=self.args.n_contexts,
-                rankings=None,
-                dataset_prefix=self.args.dataset_prefix,
-                answers=answers[i],
                 independent=(cached_judges is not None)
             )
             response = []

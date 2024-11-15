@@ -15,6 +15,7 @@ class SparseEncoderOutput(BaseModelOutput):
     logits: torch.FloatTensor = None
     mask: torch.FloatTensor = None
     last_hidden_states: torch.FloatTensor = None
+    all_hidden_states: torch.FloatTensor = None
 
 @dataclass
 class AdaptiveHeadOutput(BaseModelOutput):
