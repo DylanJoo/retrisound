@@ -41,7 +41,7 @@ def main():
     from modeling import SparseEncoder
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
-    from modeling.biencoders.sparse_new import SparseAdaptiveEncoders, AttentionHead
+    from modeling.biencoders.sparse import SparseAdaptiveEncoders, AttentionHead
     modifier = AttentionHead(
         model_opt,
         encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path)
@@ -107,6 +107,7 @@ def main():
         model=ada_retriever,
         tokenizer=tokenizer_r,
         train_dataset=train_dataset,
+        eval_dataset=train_dataset,
         data_collator=data_collator,
     )
     trainer.train()

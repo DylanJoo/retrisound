@@ -1,7 +1,7 @@
 #!/bin/sh
 #SBATCH --job-name=debug-5hr-sft
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_titan_x:4
+#SBATCH --gres=gpu:nvidia_titan_v:4
 #SBATCH --mem=63G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -18,9 +18,9 @@ export CUDA_HOME=/usr/local/cuda
 cd /home/dju/retrisound/src/
 
 # Setups
-NUM_GPUS=1
-BATCH_SIZE_PER_GPU=32
-TOTAL_BATCH_SIZE=32
+NUM_GPUS=4
+BATCH_SIZE_PER_GPU=4
+TOTAL_BATCH_SIZE=16
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3
@@ -41,11 +41,11 @@ accelerate launch \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --train_file /home/dju/datasets/beir-cellar/fiqa \
-    --split test \
+    --split train \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 5e-5 \
-    --lr_scheduler_type constant_with_warmup \
+    --lr_scheduler_type linear \
     --warmup_ratio 0.2 \
     --weight_decay 0. \
     --num_train_epochs 1 \
@@ -61,7 +61,7 @@ accelerate launch \
     --mr_coef 1.0 \
     --rl_coef 0.0 \
     --bf16 true \
-    --reward_type irrelevant_pushing \
+    --reward_type truth \
     --lucene_index_dir /home/dju/indexes/beir-cellar/fiqa.lucene \
-    --attn_implementation flash_attention_2 \
     --logging_steps 1
+    # --attn_implementation flash_attention_2 \

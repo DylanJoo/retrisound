@@ -36,23 +36,19 @@ class PRFDataset(Dataset):
 
         corpus, self.queries, self.qrels = GenericDataLoader(data_folder=dataset_dir).load(split=split)
         self.dataset_dir = dataset_dir
-
-        if quick_test is not None:
-            self.corpus = defaultdict(lambda: {'text': "this is a testing doc.", 'title': "this is a testing title."})
-            self.corpus.update(corpus)
-        else:
-            self.corpus = corpus
-
+        self.corpus = corpus
         self.split = split
+
         if split != 'test':
             self.length = len(self.queries)
             self.ids = list(self.queries.keys())
             self.corpus_ids = list(self.corpus.keys())
-        else:
+
+        if split == 'test':
             self.length = len(self.corpus)
             self.ids = list(self.corpus.keys())
             self.corpus_ids = list(self.corpus.keys())
-            self.queries = self.get_random_crop()
+            self.pseudo_queries = self.get_random_crop()
 
         ## training attributes
         self.n_max_segments = n_max_segments
@@ -131,7 +127,6 @@ class PRFDataset(Dataset):
             negative_id = random.sample([k for k, v in self.judgements[id].items() if v == 0], 1)[0]
             negatives = self.corpus[negative_id]
         except:
-            # print('no negative docs found, use random negative')
             negative_id = random.sample(self.corpus_ids, 1)[0]
             negatives = self.corpus[negative_id]
 
@@ -140,7 +135,7 @@ class PRFDataset(Dataset):
                 'query': query,
                 'feedbacks': self.feedbacks[idx],
                 'n_feedbacks': n, 
-                'contexts': [positives] + [negatives],}
+                'contexts': [positives, negatives][:self.n_max_candidates],}
 
 @dataclass
 class PRFCollator(DefaultDataCollator):
@@ -174,7 +169,7 @@ class PRFCollator(DefaultDataCollator):
         initial_q = self.tokenizer_r.batch_encode_plus(
             [f['query'] for f in features],
             add_special_tokens=True,
-            max_length=self.max_src_length,
+            max_length=64,
             truncation=self.truncation,
             padding=self.padding,
             return_tensors='pt'

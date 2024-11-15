@@ -27,13 +27,16 @@ def apply_rsp_inst_prompt(Q, D, A="", prefix="Rating:\n"):
     return p
 
 # prompts for feedback
-prompt_report = "Instruction: Write an accurate, engaging, and concise report for the given topic. Use only the provided search results (some of which might be irrelevant) and cite them properly. Always cite for any factual claim. Cite at least one document and at most three documents in each sentence."
+prompt_report = "Write an accurate, engaging, and concise report for the given topic. Use only the provided search results (some of which might be irrelevant) and cite them properly. Always cite for any factual claim. Cite at least one document and at most three documents in each sentence."
 template_report = "{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n"
-# prompt_report = "Instruction: Explain the information need of the question in detail. You may find the useful information in the given texts (some of which might be irrelevant). Write the explanation witin 50 words."
-# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nTexts:\n{D}\nExplanation:\n"
-# prompt_report = "Rewrite the question with more comprehensive contexts. Some useful context may be found in the given texts (some of which might be irrelevant)."
-# template_report = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
-# template_report = "Please write a 50 words passage to answer the question. Some of the relevant contexts are also provided for your reference (some of which might be irrelevant)\n\nContext: {D}\nQuestion: {Q}\nPassage:\n"
+
+# prompt_report = "Elaborate the information need of the question in detail. Find the useful information in the given contexts (some of which might be irrelevant, please ignore). Write the explanation witin 50 words."
+# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nContexts:\n{D}\nInformation need:\n"
+
+prompt_report = "Rewrite the question with more comprehensive contexts. Some useful context may be found in the given texts (some of which might be irrelevant)."
+template_report = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
+
+template_report = "Identify the topic of the input text and extract keywords from the contexts. Separate the keywords with comma.\n\nContext: {D}\nQuestion: {Q}\nkeywords:\n"
 
 def apply_fbk_inst_prompt(Q, D, prefix="Report:\n", *kwargs):
     p = template_report.replace('{prompt_report}', prompt_report)

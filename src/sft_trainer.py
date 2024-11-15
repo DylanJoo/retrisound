@@ -54,6 +54,7 @@ class Trainer(RewardTrainer):
         query, 
         questions,
         cached_judges=None, # this mean each passage will be judged indepedently
+        truth=None,
         reward_type='normal'
     ):
         hits = self.searcher.batch_search(
@@ -72,6 +73,7 @@ class Trainer(RewardTrainer):
         candidates = []
         for i, key in enumerate(hits):
 
+            pids = [h.docid for h in hits[key]]
             candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
             candidates.append(candidate)
 
@@ -84,25 +86,32 @@ class Trainer(RewardTrainer):
                 n_context=self.args.n_contexts,
                 independent=(cached_judges is not None)
             )
-            response = []
-            for j in range(0, len(prompt), gen_batch):
-                _, _, b_response = self.reward_model._inference(prompt[j:j+gen_batch])
-                response += b_response
-            new_reward = self.reward_model.get_rewards(response)
 
-            # update
-            for pid, judge in zip(new_pids, new_reward):
-                cached_judges[i][pid] = judge.item()
+            if reward_type == 'truth':
+                rank_positive = max( [1/(r+1) for r, c in enumerate(pids) if c in truth[i].keys()] + [0] )
+                reward = torch.tensor(float(rank_positive)).to(query.device)
 
-            if reward_type == 'cumulative':
-                new_pids = new_pids if len(new_pids) > 0 else [-1]
-                reward = torch.tensor([float(cached_judges[i][pid]) for pid in new_pids]).mean().to(query.device)
-            elif reward_type == 'irrelevant_pushing':
-                score = [float(cached_judges[i][h.docid]) for h in hits[key]] + [0]
-                rank_negative = 1 - 1 / ( (score.index(0)+1) )
-                reward = torch.tensor(float(rank_negative)).to(query.device)
             else:
-                reward = torch.tensor([float(cached_judges[i][h.docid]) for h in hits[key]]).mean().to(query.device)
+                # generation
+                response = []
+                for j in range(0, len(prompt), gen_batch):
+                    _, _, b_response = self.reward_model._inference(prompt[j:j+gen_batch])
+                    response += b_response
+                new_reward = self.reward_model.get_rewards(response)
+                # update
+                for pid, judge in zip(new_pids, new_reward):
+                    cached_judges[i][pid] = judge.item()
+
+                if reward_type == 'cumulative':
+                    new_pids = new_pids if len(new_pids) > 0 else [-1]
+                    reward = torch.tensor([float(cached_judges[i][pid]) for pid in new_pids]).mean().to(query.device)
+                elif reward_type == 'irrelevant_pushing':
+                    score = [float(cached_judges[i][h.docid]) for h in hits[key]] + [0]
+                    rank_negative = 1 - 1 / ( (score.index(0)+1) )
+                    reward = torch.tensor(float(rank_negative)).to(query.device)
+                else:
+                    reward = torch.tensor([float(cached_judges[i][h.docid]) for h in hits[key]]).mean().to(query.device)
+
             rewards.append(reward)
 
         rewards = torch.stack(rewards, 0) # B 1 
@@ -151,6 +160,7 @@ class Trainer(RewardTrainer):
         questions = inputs["query"]
         data_indices = inputs["index"] # for the next iteration
         ids = [self.train_dataset.ids[idx] for idx in data_indices]
+        truth = [self.train_dataset.qrels[id] for id in ids]
         judges = [self.train_dataset.judgements[id] for id in ids]
 
         batch_size, step_size = len(questions), self.args.num_steps
@@ -169,7 +179,7 @@ class Trainer(RewardTrainer):
                     retriever_inputs['q_masks'][0]
                 )
                 rewards_0, candidates_0, judges = self.compute_loss_reward(
-                    prev_output.reps, questions, cached_judges=judges
+                    prev_output.reps, questions, cached_judges=judges, truth=truth
                 )
                 feedback = self.compute_loss_feedback(questions, candidates_0)
             else: 
@@ -187,6 +197,7 @@ class Trainer(RewardTrainer):
                     reward, candidates, judges = self.compute_loss_reward(
                         query, questions, 
                         cached_judges=judges,
+                        truth=truth,
                         reward_type=self.args.reward_type
                     )
                     reward = reward.view(-1).to(model.device)
@@ -231,11 +242,11 @@ class Trainer(RewardTrainer):
         print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
         print('\nFeedback: ', self.train_dataset.feedbacks[data_indices[0]])
         print('\n\nTop-k terms vs rewards')
-        sample_terms = self.tokenizer.batch_decode(torch.argsort(prev_output.reps, -1, descending=True)[0, :8])
+        sample_terms = self.tokenizer.batch_decode(torch.argsort(prev_output.reps, -1, descending=True)[0, :15])
         sample_rewards = rewards_0[0].tolist()
         print(sample_terms)
         print(sample_rewards)
-        sample_terms = self.tokenizer.batch_decode(torch.argsort(output.reps[0], -1, descending=True)[:, :8])
+        sample_terms = self.tokenizer.batch_decode(torch.argsort(output.reps[0], -1, descending=True)[:, :15])
         sample_rewards = rewards[0].tolist()
         for tt, rr in zip(sample_terms, sample_rewards):
             print(rr, tt)
