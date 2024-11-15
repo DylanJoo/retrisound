@@ -59,6 +59,7 @@ class CrossAttentionLayer(nn.Module):
         combined = torch.cat([context_layer, hidden_states], dim=-1)
         selected = self.gate(combined)
 
-        context_hidden_states = selected * context_layer + (1-selected) + hidden_states
+        context_hidden_states = selected * context_layer + hidden_states
+        # context_hidden_states = context_layer
         
         return (context_hidden_states, attention_scores, selected) 

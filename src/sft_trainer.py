@@ -113,7 +113,6 @@ class Trainer(RewardTrainer):
                     reward = torch.tensor([float(cached_judges[i][h.docid]) for h in hits[key]]).mean().to(query.device)
 
             rewards.append(reward)
-
         rewards = torch.stack(rewards, 0) # B 1 
 
         if cached_judges is None:

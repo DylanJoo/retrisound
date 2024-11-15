@@ -36,7 +36,7 @@ template_report = "{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport
 prompt_report = "Rewrite the question with more comprehensive contexts. Some useful context may be found in the given texts (some of which might be irrelevant)."
 template_report = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
 
-template_report = "Identify the topic of the input text and extract keywords from the contexts. Separate the keywords with comma.\n\nContext: {D}\nQuestion: {Q}\nkeywords:\n"
+template_report = "Based on the input texts, extract the related keywords from the contexts. Then, identify the topic of the input text and keywords. Separate the keywords with commas and add ``Topics: '' after keywords.\n\nQuestion: {Q}\nContext: {D}\n\nkeywords:\n"
 
 def apply_fbk_inst_prompt(Q, D, prefix="Report:\n", *kwargs):
     p = template_report.replace('{prompt_report}', prompt_report)

@@ -1,7 +1,7 @@
 #!/bin/sh
 #SBATCH --job-name=debug-5hr-sft
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_titan_v:4
+#SBATCH --gres=gpu:nvidia_titan_x:4
 #SBATCH --mem=63G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -58,7 +58,7 @@ accelerate launch \
     --num_steps 3 \
     --samples 1 \
     --ct_coef 1.0 \
-    --mr_coef 1.0 \
+    --mr_coef 0.0 \
     --rl_coef 0.0 \
     --bf16 true \
     --reward_type truth \
