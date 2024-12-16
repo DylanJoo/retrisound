@@ -1,12 +1,12 @@
 #!/bin/sh
-#SBATCH --job-name=debug-5hr-sft
+#SBATCH --job-name=adarag
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_titan_x:4
-#SBATCH --mem=63G
+#SBATCH --gres=gpu:nvidia_rtx_a6000:1
+#SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=5:00:00
+#SBATCH --time=10:00:00
 #SBATCH --output=logs/%x.%j.out
 # nvidia_titan_x
 # nvidia_titan_v
@@ -18,9 +18,9 @@ export CUDA_HOME=/usr/local/cuda
 cd /home/dju/retrisound/src/
 
 # Setups
-NUM_GPUS=4
-BATCH_SIZE_PER_GPU=4
-TOTAL_BATCH_SIZE=16
+NUM_GPUS=1
+BATCH_SIZE_PER_GPU=64
+TOTAL_BATCH_SIZE=64
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3
@@ -40,7 +40,7 @@ accelerate launch \
     train.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
-    --train_file /home/dju/datasets/beir-cellar/fiqa \
+    --train_file /home/dju/datasets/beir-cellar/nfcorpus \
     --split train \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
@@ -62,6 +62,6 @@ accelerate launch \
     --rl_coef 0.0 \
     --bf16 true \
     --reward_type truth \
-    --lucene_index_dir /home/dju/indexes/beir-cellar/fiqa.lucene \
+    --lucene_index_dir /home/dju/indexes/beir-cellar/nfcorpus.lucene \
+    --attn_implementation flash_attention_2 \
     --logging_steps 1
-    # --attn_implementation flash_attention_2 \

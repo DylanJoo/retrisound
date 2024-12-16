@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 from transformers import AutoConfig
-from modeling.biencoders.layers import CrossAttentionLayer
+from modeling.layers import CrossAttentionLayer
 from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
 
 class AttentionHead(nn.Module):

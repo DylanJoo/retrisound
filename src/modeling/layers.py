@@ -13,7 +13,7 @@ class STEFunction(torch.autograd.Function):
     def backward(ctx, grad_output):
         return F.hardtanh(grad_output)
 
-class crossattentionlayer(nn.Module):
+class CrossAttentionLayer(nn.Module):
     def __init__(self, config, zero_init=False):
         super().__init__()
         self.hidden_size = config.hidden_size

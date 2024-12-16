@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import evaluate
-from prompts.qampari import *
 from torch.nn import CrossEntropyLoss
 
 """

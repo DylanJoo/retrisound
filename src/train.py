@@ -41,44 +41,38 @@ def main():
     from modeling import SparseEncoder
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
-    from modeling.biencoders.sparse import SparseAdaptiveEncoders, AttentionHead
-    modifier = AttentionHead(
-        model_opt,
-        encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path)
-    )
-    modifier.encoder.eval()
+    from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
     ada_retriever = SparseAdaptiveEncoders(
         model_opt,
-        encoder=SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path),
-        modifier=modifier,
+        encoder=SparseEncoder(
+            model_name_or_path=model_opt.retriever_name_or_path).eval(),
+        q_encoder=SparseEncoder(
+            model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True),
         n_candidates=train_opt.n_max_candidates
     )
 
     # [Generator]
-    from utils import update_tokenizer
-    tokenizer_g = AutoTokenizer.from_pretrained(
-        model_opt.generator_name_or_path, 
-        padding_side='left',
-        use_fast=True
-    )
-    tokenizer_g = update_tokenizer(tokenizer_g)
-    llm = AutoModelForCausalLM.from_pretrained(
-        model_opt.generator_name_or_path,
-        config=AutoConfig.from_pretrained(model_opt.generator_name_or_path),
-        attn_implementation=model_opt.attn_implementation,
-        torch_dtype=torch.bfloat16,
-    ).eval()
+    # from utils import update_tokenizer
+    # tokenizer_g = AutoTokenizer.from_pretrained(
+    #     model_opt.generator_name_or_path, 
+    #     padding_side='left',
+    #     use_fast=True
+    # )
+    # tokenizer_g = update_tokenizer(tokenizer_g)
+    # llm = AutoModelForCausalLM.from_pretrained(
+    #     model_opt.generator_name_or_path,
+    #     config=AutoConfig.from_pretrained(model_opt.generator_name_or_path),
+    #     attn_implementation=model_opt.attn_implementation,
+    #     torch_dtype=torch.bfloat16,
+    # ).eval()
 
     # [RAG]
-    generation_config = init_generation_config(model_opt, tokenizer_g)
+    # generation_config = init_generation_config(model_opt, tokenizer_g)
 
-    from modeling import GenerativeRewardWrapper, Judgement, Metric
-    reward_model = GenerativeRewardWrapper(
-        generator=llm, 
-        tokenizer=tokenizer_g, 
-        utility=Judgement(list(range(6)), counting=False),
-        generation_config=generation_config
-    ).eval()
+    from options import LLMOptions
+    from modeling.llm import vLLM
+    llm_opt = LLMOptions()
+    generator = vLLM(llm_opt)
 
     # [Data]
     train_opt.dataset_prefix = data_opt.train_file.lower()
@@ -95,19 +89,18 @@ def main():
     )
 
     ## data ollator
-    data_collator = PRFCollator(tokenizer_r=tokenizer_r, tokenizer_g=tokenizer_g,)
+    data_collator = PRFCollator(tokenizer=tokenizer_r)
 
     # [trainer]
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
     from trainer import Trainer
     trainer = Trainer(
         args=train_opt,
-        reward_model=reward_model,
+        generator=generator,
         index_dir=model_opt.lucene_index_dir,
         model=ada_retriever,
         tokenizer=tokenizer_r,
         train_dataset=train_dataset,
-        eval_dataset=train_dataset,
         data_collator=data_collator,
     )
     trainer.train()

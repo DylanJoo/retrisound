@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import BertModel, BertForMaskedLM, AutoConfig
 from modeling.outputs import SparseEncoderOutput, DenseEncoderOutput
+from modeling.layers import CrossAttentionLayer
 
 def normalize(tensor, eps=1e-9):
     return tensor / (torch.norm(tensor, dim=-1, keepdim=True) + eps)
@@ -9,15 +10,18 @@ def normalize(tensor, eps=1e-9):
 class SparseEncoder(nn.Module):
     def __init__(self, model_name_or_path, **kwargs):
         super().__init__()
-        if kwargs.pop('cross_attention', False):
-            config = AutoConfig.from_pretrained(model_name_or_path, 
-                is_decoder=True, 
-                add_cross_attention=True,
-                num_hidden_layers=2
-            )
+
+        self.add_cross_attention = kwargs.pop('cross_attention', False)
+        if self.add_cross_attention:
+            config = AutoConfig.from_pretrained(model_name_or_path)
+            self.crossattentionlayer = CrossAttentionLayer(config)
+            # config = AutoConfig.from_pretrained(model_name_or_path, 
+            #     is_decoder=True, 
+            #     add_cross_attention=True,
+            #     num_hidden_layers=2
+            # )
         else:
             config = None
-
         self.model = BertForMaskedLM.from_pretrained(model_name_or_path, config=config)
         self.output = kwargs.pop('output', 'MLM')
         self.agg = kwargs.pop('agg', 'max')
@@ -38,33 +42,36 @@ class SparseEncoder(nn.Module):
         output_hidden_states=None,
     ):
 
-        model_output = self.model.forward(
+        outputs = self.model.bert(
             input_ids=input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
+            encoder_hidden_states=None,
+            encoder_attention_mask=None,
             output_attentions=output_attentions,
-            output_hidden_states=True
+            output_hidden_states=True,
         )
 
-        last_hidden_states = model_output["hidden_states"][-1]
-        logits = model_output.logits 
+        if self.add_cross_attention:
+            last_hidden_states = self.crossattentionlayer(
+                hidden_states=outputs[0],
+                attention_mask=attention_mask,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_attention_mask
+            )[0]
+        else: 
+            last_hidden_states = outputs[0]
+
+        logits = self.model.cls(last_hidden_states)
 
         # pooling/aggregation
-        if self.agg == "sum":
-            values = torch.sum(
-                torch.log(1 + torch.relu(logits)) 
-                * attention_mask.unsqueeze(-1), dim=1
-            ) 
-        else:
-            values, _ = torch.max(
-                torch.log(1 + torch.relu(logits)) 
-                * attention_mask.unsqueeze(-1), dim=1
-            )
+        values = torch.sum(
+            torch.log(1 + torch.relu(logits)) 
+            * attention_mask.unsqueeze(-1), dim=1
+        ) 
 
         # normalization (for cos)
         if self.norm:
@@ -74,7 +81,7 @@ class SparseEncoder(nn.Module):
             reps=values, 
             logits=logits, 
             last_hidden_states=last_hidden_states, 
-            all_hidden_states=model_output["hidden_states"], 
+            all_hidden_states=outputs["hidden_states"], 
             mask=attention_mask
         )
 

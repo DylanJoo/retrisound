@@ -139,8 +139,7 @@ class PRFDataset(Dataset):
 
 @dataclass
 class PRFCollator(DefaultDataCollator):
-    tokenizer_r: Union[PreTrainedTokenizerBase] = None
-    tokenizer_g: Union[PreTrainedTokenizerBase] = None
+    tokenizer: Union[PreTrainedTokenizerBase] = None
     truncation: Union[bool, str] = True
     padding: Union[bool, str, PaddingStrategy] = 'longest'
     max_src_length: Union[int] = 256
@@ -166,7 +165,7 @@ class PRFCollator(DefaultDataCollator):
 
         # Query
         ## Initial query
-        initial_q = self.tokenizer_r.batch_encode_plus(
+        initial_q = self.tokenizer.batch_encode_plus(
             [f['query'] for f in features],
             add_special_tokens=True,
             max_length=64,
@@ -178,10 +177,9 @@ class PRFCollator(DefaultDataCollator):
         batch_r['q_masks'] = [initial_q['attention_mask']]
 
         ## Feedbacks as followup query
-        # original_pad_token = self.tokenizer_r.pad_token
         for seg_num in range(n_max_segments): 
             batch_feedback_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
-            feedback_q = self.tokenizer_r.batch_encode_plus(
+            feedback_q = self.tokenizer.batch_encode_plus(
                 [fbk for fbk in batch_feedback_q],
                 add_special_tokens=True,
                 max_length=self.max_src_length,
@@ -191,7 +189,6 @@ class PRFCollator(DefaultDataCollator):
             ).to(device)
             batch_r['q_tokens'].append(feedback_q['input_ids'])
             batch_r['q_masks'].append(feedback_q['attention_mask'])
-        # self.tokenizer_r.pad_token = original_pad_token
 
         # Document # positive + (negative if it has)
         candidate_size = len(features[0]['contexts'])
@@ -199,7 +196,7 @@ class PRFCollator(DefaultDataCollator):
         batch_r['d_masks'] = []
 
         for i in range(candidate_size):
-            candidate = self.tokenizer_r.batch_encode_plus(
+            candidate = self.tokenizer.batch_encode_plus(
                 [f"{features[b]['contexts'][i]['title']} {features[b]['contexts'][i]['text']}".strip() 
                     for b in range(batch_size)],
                 add_special_tokens=True,

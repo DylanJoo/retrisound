@@ -74,19 +74,9 @@ class Trainer(RewardTrainer):
         for i, key in enumerate(hits):
 
             pids = [h.docid for h in hits[key]]
-            candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
-            candidates.append(candidate)
+            candidate = [self.train_dataset.corpus[pid] for pid in pids]
 
             # run new rewards
-            new_pids = [h.docid for h in hits[key] if (h.docid not in cached_judges[i])]
-            new_candidates = [c for (c, h) in zip(candidate, hits[key]) if h.docid in new_pids]
-            prompt = augmentation_response(
-                questions=questions[i], 
-                candidates=new_candidates,
-                n_context=self.args.n_contexts,
-                independent=(cached_judges is not None)
-            )
-
             if reward_type == 'truth':
                 rank_positive = max( [1/(r+1) for r, c in enumerate(pids) if c in truth[i].keys()] + [0] )
                 reward = torch.tensor(float(rank_positive)).to(query.device)

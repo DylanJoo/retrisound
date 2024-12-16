@@ -56,3 +56,8 @@ class ReinforceOptions(RewardConfig):
     rl_coef: Optional[float] = field(default=1.0)
     reward_type: str = field(default='normal')
 
+@dataclass
+class LLMOptions:
+    model: Optional[str] = field(default="")
+    temperature: Optional[float] = field(default=0.0)
+    top_p: Optional[float] = field(default=1.0)

@@ -27,16 +27,14 @@ def apply_rsp_inst_prompt(Q, D, A="", prefix="Rating:\n"):
     return p
 
 # prompts for feedback
-prompt_report = "Write an accurate, engaging, and concise report for the given topic. Use only the provided search results (some of which might be irrelevant) and cite them properly. Always cite for any factual claim. Cite at least one document and at most three documents in each sentence."
-template_report = "{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n"
+# prompt_report = "Write an accurate, engaging, and concise report for the given topic. Use only the provided search results (some of which might be irrelevant) and cite them properly. Always cite for any factual claim. Cite at least one document and at most three documents in each sentence."
+# template_report = "{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n"
 
 # prompt_report = "Elaborate the information need of the question in detail. Find the useful information in the given contexts (some of which might be irrelevant, please ignore). Write the explanation witin 50 words."
-# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nContexts:\n{D}\nInformation need:\n"
+# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nContexts:\n{D}\nExplanation:\n"
 
-prompt_report = "Rewrite the question with more comprehensive contexts. Some useful context may be found in the given texts (some of which might be irrelevant)."
+prompt_report = "Rewrite the question with more comprehensive contexts, making the question easier to understand. Some useful preliminary knowledge could be found in the given texts (but some of which might be irrelevant)."
 template_report = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
-
-template_report = "Based on the input texts, extract the related keywords from the contexts. Then, identify the topic of the input text and keywords. Separate the keywords with commas and add ``Topics: '' after keywords.\n\nQuestion: {Q}\nContext: {D}\n\nkeywords:\n"
 
 def apply_fbk_inst_prompt(Q, D, prefix="Report:\n", *kwargs):
     p = template_report.replace('{prompt_report}', prompt_report)
