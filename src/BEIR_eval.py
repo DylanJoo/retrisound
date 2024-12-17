@@ -8,6 +8,8 @@ from transformers import AutoTokenizer
 from modeling.llm import vLLM
 import ir_measures
 from ir_measures import nDCG, R
+from tqdm import tqdm
+import pickle
 
 def batch_iterator(iterable, size=1, return_index=False):
     l = len(iterable)
@@ -52,12 +54,14 @@ def evaluate(args):
 
     ## load model 
     ada_encoder, tokenizer = prepare_encoder(args)
-    generator = vLLM(args.generator_name, num_gpus=1) if args.iteration > 0 else None
     q_ids = list(queries.keys())[:args.debug]
+
+    ## load generators
+    generator = vLLM(args.generator_name, num_gpus=1) if args.iteration > 0 else None
 
     # inference runs by searching
     runs = {}
-    for batch_q_ids in batch_iterator(q_ids, args.batch_size):
+    for batch_q_ids in tqdm(batch_iterator(q_ids, args.batch_size)):
         batch_q_texts = [queries[id] for id in batch_q_ids]
 
         # proces queries and produce reprs.
@@ -119,8 +123,7 @@ def evaluate(args):
 
     # load run
     result = ir_measures.calc_aggregate([nDCG@10, R@100], qrels, runs) 
-    # print(result)
-    return result
+    return (runs, (result[nDCG@10], result[R@100]) )
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -136,8 +139,17 @@ if __name__ == '__main__':
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--device", type=str, default='cuda') 
     parser.add_argument("--debug", type=int, default=None)
+    parser.add_argument("--exp", type=str, default='debug')
     args = parser.parse_args()
 
     prompt = "Rewrite the question with more comprehensive contexts, making the question easier to understand. Some useful knowledge could be found in the given texts from search engine (but some of which might be irrelevant).\n\nQuestion: {}\nContexts:\n{}\nRewritten question:\n"
 
-    evaluate(args)
+    runs, results = evaluate(args)
+    print(f" ============= ")
+    print(f"# [Rd] {args.d_encoder_name} [Rq] {args.q_encoder_name_or_path} [G] {args.generator_name}")
+    print(f" Dataset: {args.dataset_dir}: {results[0]} | {results[1]} ")
+    print(f" ============= ")
+
+    # save runs
+    with open( f'run-{args.exp}.pickle', 'wb') as f:
+        pickle.dump(runs, f, pickle.HIGHEST_PROTOCOL)
