@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
-#SBATCH --array=1-10%2
+#SBATCH --array=9-13%2
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 

@@ -15,11 +15,6 @@ class SparseEncoder(nn.Module):
         if self.add_cross_attention:
             config = AutoConfig.from_pretrained(model_name_or_path)
             self.crossattentionlayer = CrossAttentionLayer(config)
-            # config = AutoConfig.from_pretrained(model_name_or_path, 
-            #     is_decoder=True, 
-            #     add_cross_attention=True,
-            #     num_hidden_layers=2
-            # )
         else:
             config = None
         self.model = BertForMaskedLM.from_pretrained(model_name_or_path, config=config)
@@ -40,6 +35,7 @@ class SparseEncoder(nn.Module):
         encoder_attention_mask=None,
         output_attentions=None,
         output_hidden_states=None,
+        context_mask=None,
     ):
 
         outputs = self.model.bert(
@@ -67,11 +63,14 @@ class SparseEncoder(nn.Module):
 
         logits = self.model.cls(last_hidden_states)
 
+        # LLM context masking
+        logits = logits * (context_mask or attention_mask).unsqueeze(-1)
+
         # pooling/aggregation
-        values = torch.sum(
+        values, _ = torch.max(
             torch.log(1 + torch.relu(logits)) 
             * attention_mask.unsqueeze(-1), dim=1
-        ) 
+        )
 
         # normalization (for cos)
         if self.norm:

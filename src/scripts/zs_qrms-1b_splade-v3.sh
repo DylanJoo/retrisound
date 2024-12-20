@@ -1,10 +1,10 @@
 #!/bin/sh
-#SBATCH --job-name=base-eval
+#SBATCH --job-name=zsqr-eval
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_titan_v:1
+#SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
-#SBATCH --array=7-7%1
+#SBATCH --array=1-9%1
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 
@@ -29,8 +29,7 @@ python3 BEIR_eval.py \
     --d_encoder_name $RETRIEVER \
     --q_encoder_name_or_path $RETRIEVER \
     --split test \
-    --top_k 100 \
-    --iteration 0 \
-    --batch_size 32 \
+    --iteration 1 --expansion --prompt_type msmarco \
+    --batch_size 4 \
     --device cuda \
-    --exp ${each}-baseline
+    --exp zsqr_${each}

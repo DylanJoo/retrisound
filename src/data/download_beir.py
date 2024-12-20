@@ -1,6 +1,7 @@
 import os
 from beir import util
 from beir.datasets.data_loader import GenericDataLoader
+from datasets import load_dataset
 
     # 'msmarco', 'nfcorpus', 'nq', \
 dataset_list = [
@@ -13,10 +14,14 @@ dataset_list_testonly = [
 ]
 
 DATASET_ROOT='/home/dju/datasets/beir-cellar/'
+# DATASET_ROOT='/home/dju/datasets/beir-new/'
 os.makedirs(DATASET_ROOT, exist_ok=True)
-for dataset_name in dataset_list:
+
+# queries and corpus
+for dataset_name in dataset_list_testonly:
+    # original site
     url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset_name)
-    # out_dir = os.path.join(DATASET_ROOT, dataset_name)
     data_path = util.download_and_unzip(url, DATASET_ROOT)
-    print(data_path)
-    # corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split="test")
+
+    # huggingface
+    corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split="test")

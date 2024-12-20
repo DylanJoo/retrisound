@@ -124,7 +124,7 @@ if __name__ == '__main__':
             item = json.loads(line.strip())
             if 'contents' not in item.keys(): # for beir-cellar
                 item['id'] = item['_id']
-                item['contents'] = item['title'] + " " + item['text']
+                item['contents'] = (item['title'] + " " + item['text']).strip()
             collection.append(item)
 
             if len(collection) >= 1000000:

@@ -21,7 +21,7 @@ class SparseAdaptiveEncoders(nn.Module):
 
         for n, p in self.named_parameters():
             if 'crossattention' in n:
-                p.requires_grad = True 
+                p.requires_grad = True
             else:
                 p.requires_grad = False
 
@@ -43,7 +43,6 @@ class SparseAdaptiveEncoders(nn.Module):
         if prev_output is None:
             prev_output = self.encoder(q_tokens, q_masks)
             output = prev_output
-
         else:
             f_output = self.encoder(f_tokens, f_masks)
             output = self.q_encoder(

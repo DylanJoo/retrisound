@@ -1,5 +1,10 @@
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+import re
 import argparse
 import torch
+import torch.nn.functional as F
 from modeling import SparseEncoder
 from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
 from beir.datasets.data_loader import GenericDataLoader
@@ -35,12 +40,30 @@ def apply_docs_prompt(doc_items, field='text'):
     return p
 
 def prepare_encoder(args):
-    encoder = SparseAdaptiveEncoders(
-        encoder=SparseEncoder(args.d_encoder_name),
+    biencoders = SparseAdaptiveEncoders(
+        encoder=SparseEncoder(args.q_encoder_name_or_path),
         q_encoder=SparseEncoder(args.q_encoder_name_or_path, cross_attention=True) 
     ).to(args.device).eval()
     tokenizer = AutoTokenizer.from_pretrained(args.d_encoder_name)
-    return encoder, tokenizer
+    return biencoders, tokenizer
+
+def postprocess_output(output, tag='q'):
+    output = output.split(f'</{tag}>')[0]
+    output = output.split('\n')[0]
+    output = re.sub(r"\d+\.\s", "", output).strip()
+    output = re.sub(r"-\s", "", output).strip()
+    return output
+
+# query rewriting
+EXAMPLE = ""
+prompt = {
+"qr": "Rewrite the text and make it easier for search engine to find relevant information. Write the text within `<q>` and `<q/>` tags.\nText: {}\nRewritten text: <q>",
+"msmarco": "Write the text into a web search question and make it easier for search engine to find relevant information.\nText: {}\nRewritten question: ",
+"q2r": "Write an accurate, engaging, and concise report for the given topic.\n\n" + EXAMPLE + \
+        "Topic: {}\nReport: ",
+"prf_q2r": "Write an accurate, engaging, and concise report for the given topic. The search results are provided as references.\n\n" + EXAMPLE + \
+        "Topic: {}\nContext: {}\nReport: ",
+}
 
 @torch.no_grad()
 def evaluate(args):
@@ -89,26 +112,49 @@ def evaluate(args):
 
             ### prepare LLMPRF
             prf_prompts = []
-            for query, hit in zip(batch_q_texts, hits):
-                docs = apply_docs_prompt([h.docid for h in hit[args.top_k]])
-                prf_prompts.append(prompt.format(query, docs))
-            prf = generator.generate(prf_prompts)
+            for query, id in zip(batch_q_texts, hits):
+                docs = apply_docs_prompt([corpus[h.docid] for h in hits[id][:args.top_k]])
+                prf_prompts.append(prompt[args.prompt_type].format(query, docs))
+            prf = generator.generate(prf_prompts, max_tokens=64, min_tokens=0)
+            batch_o_texts = [postprocess_output(o, tag='q') for o in prf]
+
+            #### demonstration
+            for o, q in zip(batch_o_texts, batch_q_texts):
+                print(f"# {q} --> {o}\n")
+
+            #### expansion (or not)
+            batch_o_texts = [(q * args.expansion + " " + o).strip() for (q, o) in zip(batch_q_texts, batch_o_texts)]
 
             ### process feedbacks and queries and produce reprs.
             f_inputs = tokenizer(
-                prf,
+                batch_o_texts,
                 add_special_tokens=True,
                 max_length=args.max_length,
                 truncation=True,
                 padding=True,
                 return_tensors='pt'
             ).to(args.device)
-            q_outputs = ada_encoder(None, None, 
-                f_inputs['input_ids'], f_inputs['attention_mask'],
-                prev_output=q_outputs.prev_out
-            )
+
+            if args.adaptive:
+                q_outputs = ada_encoder(
+                    None, None, 
+                    f_inputs['input_ids'], f_inputs['attention_mask'],
+                    prev_output=q_outputs.prev_out
+                )
+            else:
+                if args.context_masking:
+                    padding = f_inputs['attention_mask'].size(1) - q_inputs['attention_mask'].size(1)
+                    context_mask = F.pad(q_inputs['attention_mask'], (0, padding))
+                else:
+                    context_mask = None
+                q_outputs = ada_encoder(
+                    f_inputs['input_ids'], 
+                    f_inputs['attention_mask'],
+                    context_mask=context_mask
+                )
             q_reps = q_outputs.reps
 
+            ### Re-retrieve
             hits = searcher.batch_search(
                 logits=q_reps.float().detach().cpu().numpy(), 
                 q_ids=batch_q_ids,
@@ -117,8 +163,11 @@ def evaluate(args):
             )
 
         for id in batch_q_ids:
-            batch_runs = {h.docid: h.score for h in hits[id]}
-            # print([h.docid for h in hits[id]])
+            try:
+                batch_runs = {h.docid: h.score for h in hits[id]}
+            except:
+                logger.warn(f"No relevant documents found for query {id}")
+                batch_runs = {'NA': 0}
             runs.update({id: batch_runs})
 
     # load run
@@ -131,10 +180,17 @@ if __name__ == '__main__':
     parser.add_argument("--index_dir",type=str, default=None)
     parser.add_argument("--d_encoder_name", type=str, default='naver/splade-v3')
     parser.add_argument("--q_encoder_name_or_path", type=str, default='naver/splade-v3')
-    parser.add_argument("--generator_name", type=str, default='meta-llama/Llama-3.2-1B')
     parser.add_argument("--split", type=str, default='train') 
+
+    ## generation-augmentation
+    parser.add_argument("--generator_name", type=str, default='meta-llama/Llama-3.2-1B-Instruct')
     parser.add_argument("--top_k", type=int, default=5)
     parser.add_argument("--iteration", type=int, default=0) 
+    parser.add_argument("--expansion", type=int, default=0)
+    parser.add_argument("--prompt_type", type=str, default='qr')
+    parser.add_argument("--adaptive", action='store_true', default=False) # leaned or zero-shot
+    parser.add_argument("--context_masking", action='store_true', default=False)
+
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--device", type=str, default='cuda') 
@@ -142,14 +198,13 @@ if __name__ == '__main__':
     parser.add_argument("--exp", type=str, default='debug')
     args = parser.parse_args()
 
-    prompt = "Rewrite the question with more comprehensive contexts, making the question easier to understand. Some useful knowledge could be found in the given texts from search engine (but some of which might be irrelevant).\n\nQuestion: {}\nContexts:\n{}\nRewritten question:\n"
-
     runs, results = evaluate(args)
     print(f" ============= ")
-    print(f"# [Rd] {args.d_encoder_name} [Rq] {args.q_encoder_name_or_path} [G] {args.generator_name}")
-    print(f" Dataset: {args.dataset_dir}: {results[0]} | {results[1]} ")
+    print(f"## [Data path] {args.dataset_dir}")
+    print(f"## [Rd] {args.d_encoder_name} [Rq] {args.q_encoder_name_or_path} [G] {args.generator_name}")
+    print(f"### {args.dataset_dir.split('/')[-1]} | {args.exp} | {results[0]:.4f} | {results[1]:.4f} |")
     print(f" ============= ")
 
     # save runs
-    with open( f'run-{args.exp}.pickle', 'wb') as f:
-        pickle.dump(runs, f, pickle.HIGHEST_PROTOCOL)
+    # with open( f'run-{args.exp}.pickle', 'wb') as f:
+    #     pickle.dump(runs, f, pickle.HIGHEST_PROTOCOL)
