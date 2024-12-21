@@ -57,8 +57,10 @@ def postprocess_output(output, tag='q'):
 # query rewriting
 EXAMPLE = ""
 prompt = {
-"qr": "Rewrite the text and make it easier for search engine to find relevant information. Write the text within `<q>` and `<q/>` tags.\nText: {}\nRewritten text: <q>",
-"msmarco": "Write the text into a web search question and make it easier for search engine to find relevant information.\nText: {}\nRewritten question: ",
+"qe": "Write a list of keywords for the given text.\nText: {}\nKeywords: ",
+"prf_qe": "Write a list of keywords for the given text. Extract keywords from the provided references.\n\n" + EXAMPLE + \
+        "Text: {}\nReferences:{} \nKeywords: ",
+"qr": "Rewrite the text and make it easier for search engine to find relevant information.\nText: {}\nRewritten text: ",
 "q2r": "Write an accurate, engaging, and concise report for the given topic.\n\n" + EXAMPLE + \
         "Topic: {}\nReport: ",
 "prf_q2r": "Write an accurate, engaging, and concise report for the given topic. The search results are provided as references.\n\n" + EXAMPLE + \
@@ -115,15 +117,16 @@ def evaluate(args):
             for query, id in zip(batch_q_texts, hits):
                 docs = apply_docs_prompt([corpus[h.docid] for h in hits[id][:args.top_k]])
                 prf_prompts.append(prompt[args.prompt_type].format(query, docs))
+
             prf = generator.generate(prf_prompts, max_tokens=64, min_tokens=0)
             batch_o_texts = [postprocess_output(o, tag='q') for o in prf]
+
+            #### expansion (or not)
+            batch_o_texts = [(q * args.expansion + " " + o).strip() for (q, o) in zip(batch_q_texts, batch_o_texts)]
 
             #### demonstration
             for o, q in zip(batch_o_texts, batch_q_texts):
                 print(f"# {q} --> {o}\n")
-
-            #### expansion (or not)
-            batch_o_texts = [(q * args.expansion + " " + o).strip() for (q, o) in zip(batch_q_texts, batch_o_texts)]
 
             ### process feedbacks and queries and produce reprs.
             f_inputs = tokenizer(

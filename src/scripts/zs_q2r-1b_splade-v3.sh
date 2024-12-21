@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
-#SBATCH --array=1-10%1
+#SBATCH --array=1-9%1
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 
@@ -19,7 +19,6 @@ RETRIEVER=naver/splade-v3
 MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 
 # Generate embeddings
-# echo Runing $file 
 each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 echo $each
 
@@ -31,6 +30,7 @@ python3 BEIR_eval.py \
     --generator_name meta-llama/Llama-3.2-1B-Instruct \
     --split test \
     --batch_size 4 \
-    --iteration 1 --expansion 5 --prompt_type q2r \
+    --iteration 1 --expansion 1 --prompt_type q2r \
+    --context_masking \
     --device cuda \
-    --exp zsq2r
+    --exp debug

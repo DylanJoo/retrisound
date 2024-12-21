@@ -1,10 +1,10 @@
 #!/bin/sh
-#SBATCH --job-name=prfq2r
+#SBATCH --job-name=prf
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
-#SBATCH --array=1-10%1
+#SBATCH --array=1-9%1
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 
@@ -15,7 +15,6 @@ conda activate retrisound
 cd /home/dju/retrisound/src/
 
 # Setups
-VLLM_ATTENTION_BACKEND=XFORMERS
 RETRIEVER=naver/splade-v3
 MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 
@@ -32,7 +31,6 @@ python3 BEIR_eval.py \
     --generator_name meta-llama/Llama-3.2-1B-Instruct \
     --split test \
     --batch_size 4 \
-    --iteration 1 --expansion 1 --top_k 5 --prompt_type prf_q2r \
-    --context_masking \
+    --iteration 1 --expansion 1 --top_k 1 --prompt_type prf_qe \
     --device cuda \
     --exp debug

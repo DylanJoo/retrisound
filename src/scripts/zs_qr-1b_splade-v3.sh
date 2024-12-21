@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=zsqr-eval
+#SBATCH --job-name=zs
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -19,7 +19,6 @@ RETRIEVER=naver/splade-v3
 MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 
 # Generate embeddings
-# echo Runing $file 
 each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 echo $each
 
@@ -28,8 +27,9 @@ python3 BEIR_eval.py \
     --index_dir /home/dju/indexes/beir-cellar/${each}.lucene \
     --d_encoder_name $RETRIEVER \
     --q_encoder_name_or_path $RETRIEVER \
+    --generator_name meta-llama/Llama-3.2-1B-Instruct \
     --split test \
-    --iteration 1 --expansion --prompt_type msmarco \
     --batch_size 4 \
+    --iteration 1 --expansion 1 --prompt_type qe \
     --device cuda \
-    --exp zsqr_${each}
+    --exp debug
