@@ -31,12 +31,13 @@ import torch.nn.functional as F
 
 from transformers.modeling_utils import PreTrainedModel
 from transformers import Trainer as Trainer_hf
+import ir_measures
+from ir_measures import nDCG, R
 from utils import (
     augmentation_response,
     augmentation_feedback,
     load_searcher
 )
-from sentence_transformers.evaluation import NanoBEIREvaluator
 
 class Trainer(Trainer_hf):
 
@@ -44,23 +45,25 @@ class Trainer(Trainer_hf):
         super().__init__(**kwargs)
         self.generator = generator
         self.searcher = load_searcher(index_dir, lexical=True)
-        self._move_model_to_device(self.generator, self.args.device)
+        # self._move_model_to_device(self.generator, self.args.device)
 
-    def measure_ranking(self):
-        pass
+    def measure_ranking(self, pids_pred, pids_truth):
+        qrel = {"dummy": pids_truth}
+        run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
+        result = ir_measures.calc_aggregate([nDCG@10], qrel, run)[nDCG@10]
+        return result
 
     def compute_loss_reward(
         self, 
         query, 
         questions,
-        cached_judges=None, # this mean each passage will be judged indepedently
         truth=None,
         reward_type='normal'
     ):
-        gen_batch = (1 or self.args.generation_batch)
+        gen_batch = (self.args.generation_batch or 1)
 
         hits = self.searcher.batch_search(
-            logits=query.float().detach().cpu().numpy(), 
+            logits=query.clone().float().detach().cpu().numpy(), 
             q_ids=[str(i) for i in range(query.size()[0])],
             k=self.args.n_contexts,
             threads=32
@@ -75,21 +78,15 @@ class Trainer(Trainer_hf):
             pids = [h.docid for h in hits[key]]
             candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
             candidates.append(candidate)
-
-            reward = self.measure_ranking(pids, truth)
-
-            # update
-            for pid, judge in zip(new_pids, new_reward):
-                cached_judges[i][pid] = judge.item()
-
+            reward = self.measure_ranking(pids, truth[i])
             rewards.append(reward)
 
-        rewards = torch.stack(rewards, 0) # B 1 
-        return rewards, candidates, cached_judges
+        rewards = torch.tensor(rewards) # B 1 
+        return rewards, candidates
 
     def compute_loss_feedback(self, questions, contexts):
 
-        gen_batch = (1 or self.args.generation_batch)
+        gen_batch = (self.args.generation_batch or 1)
 
         def remove_citations(sent):
             return re.sub(r"\[\d+", "", re.sub(r" \[\d+", "", sent)).replace(" |", "").replace("]", "")
@@ -101,7 +98,7 @@ class Trainer(Trainer_hf):
         )
         feedback = []
         for i in range(0, len(prompt), gen_batch):
-            _, _, b_feedback = self.generator.generate(prompt[i:i+gen_batch])
+            b_feedback = self.generator.generate(prompt[i:i+gen_batch])
             b_feedback = [remove_citations(f) for f in b_feedback]
             feedback += b_feedback
 
@@ -112,6 +109,7 @@ class Trainer(Trainer_hf):
         model: Union[PreTrainedModel, nn.Module],
         inputs: Dict[str, Union[torch.Tensor, Any]],
         return_outputs=False,
+        num_items_in_batch=None
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
 
         ## collect inputs 
@@ -119,8 +117,7 @@ class Trainer(Trainer_hf):
         questions = inputs["query"]
         data_indices = inputs["index"] # for the next iteration
         ids = [self.train_dataset.ids[idx] for idx in data_indices]
-        truth = [self.train_dataset.qrels[id] for id in ids]
-        judges = [self.train_dataset.judgements[id] for id in ids]
+        qrels = [self.train_dataset.qrels[id] for id in ids]
 
         batch_size, step_size = len(questions), self.args.num_steps
 
@@ -138,47 +135,46 @@ class Trainer(Trainer_hf):
                     q_masks=retriever_inputs['q_masks'][0], 
                     step=0
                 )
-                reward, candidates, judges = self.compute_loss_reward(
-                    output.reps, questions, cached_judges=judges, truth=truth
+                reward, candidates = self.compute_loss_reward(
+                    output.reps, questions, truth=qrels
                 )
                 feedback = self.compute_loss_feedback(questions, candidates)
                 candidates_0 = candidates
-                q_out = output.q_out
+                q_out = output
             else: 
                 retriever_inputs = self.data_collator.get_inputs_for_retriever(
                     [self.train_dataset[idx] for idx in data_indices],
                     device=model.device
                 )
                 output = model(
-                    output=q_out,
                     q_tokens=retriever_inputs['q_tokens'][0], 
                     q_masks=retriever_inputs['q_masks'][0], 
                     f_tokens=retriever_inputs['q_tokens'][t], 
                     f_masks=retriever_inputs['q_masks'][t], 
                     d_tokens=retriever_inputs['d_tokens'],
                     d_masks=retriever_inputs['d_masks'],
+                    prev_output=q_out,
                     step=t,
                 )
-                reward, candidates, judges = self.compute_loss_reward(
-                    output.reps, questions, cached_judges=judges, truth=truth
+                reward, candidates = self.compute_loss_reward(
+                    output.reps, questions, truth=qrels
                 )
                 feedback = self.compute_loss_feedback(questions, candidates) 
                 ct_losses.append(output.loss_ct)
 
-            reps.append(output.reps)
-            rewards.append(reward)
+                reps.append(output.reps)
+                rewards.append(reward)
 
             # [NOTE] here we use the last sample as the stored feedback
             for j in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[j], feedback[j])
-                self.train_dataset.add_judgements(data_indices[j], judges[j], info=questions[j])
-
 
         rewards = torch.stack(rewards, 1)
-        contrastive_loss = torch.stack(ct_losses, 0)
-
+        contrastive_loss = torch.stack(ct_losses)
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         print(f"{name} gradient: {param.grad}")
         contrastive_loss = contrastive_loss.mean()
-
         loss = (contrastive_loss * self.args.ct_coef) 
 
         self.log({"train/reward": rewards.mean().item()})

@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=adarag
+#SBATCH --job-name=debug
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -19,8 +19,8 @@ cd /home/dju/retrisound/src/
 
 # Setups
 NUM_GPUS=1
-BATCH_SIZE_PER_GPU=64
-TOTAL_BATCH_SIZE=64
+BATCH_SIZE_PER_GPU=32
+TOTAL_BATCH_SIZE=32
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3
@@ -32,7 +32,7 @@ echo "$BATCH_SIZE_PER_GPU batch size per GPU"
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
-    --mixed_precision bf16 \
+    --mixed_precision fp16 \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
@@ -40,7 +40,7 @@ accelerate launch \
     train.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
-    --train_file /home/dju/datasets/beir-cellar/nfcorpus \
+    --train_file $DATASET_DIR/beir-cellar/nfcorpus \
     --split train \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
@@ -51,10 +51,10 @@ accelerate launch \
     --num_train_epochs 1 \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
-    --generation_batch 2 \
-    --n_contexts 5 \
-    --n_max_candidates 2 \
-    --n_max_segments 5 \
+    --generation_batch 4 \
+    --n_contexts 10 \
+    --n_max_candidates 5 \
+    --n_max_segments 3 \
     --num_steps 3 \
     --samples 1 \
     --ct_coef 1.0 \

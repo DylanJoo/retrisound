@@ -66,4 +66,4 @@ class crossattentionlayer(nn.Module):
 
         context_hidden_states = context_layer + hidden_states
         
-        return (context_hidden_states, attention_scores, combined) 
+        return (context_hidden_states, attention_scores, ) 

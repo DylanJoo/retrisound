@@ -49,7 +49,7 @@ class ReinforceOptions(RewardConfig):
     update_epochs: Optional[int] = field(default=4)
     reward_function: Optional[str] = field(default='metric')
     ampere_gpu: Optional[bool] = field(default=False)
-    generation_batch: Optional[int] = field(default=None)
+    generation_batch: Optional[int] = field(default=2)
     report_to: Optional[str] = field(default="wandb")
     ct_coef: Optional[float] = field(default=0.0)
     mr_coef: Optional[float] = field(default=0.0)

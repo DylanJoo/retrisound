@@ -37,42 +37,17 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    ## Config & tokenizer
     from modeling import SparseEncoder
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
 
     from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
-    ada_retriever = SparseAdaptiveEncoders(
-        model_opt,
-        encoder=SparseEncoder(
-            model_name_or_path=model_opt.retriever_name_or_path).eval(),
-        q_encoder=SparseEncoder(
-            model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True),
-        n_candidates=train_opt.n_max_candidates
-    )
-
-    # [Generator]
-    # from utils import update_tokenizer
-    # tokenizer_g = AutoTokenizer.from_pretrained(
-    #     model_opt.generator_name_or_path, 
-    #     padding_side='left',
-    #     use_fast=True
-    # )
-    # tokenizer_g = update_tokenizer(tokenizer_g)
-    # llm = AutoModelForCausalLM.from_pretrained(
-    #     model_opt.generator_name_or_path,
-    #     config=AutoConfig.from_pretrained(model_opt.generator_name_or_path),
-    #     attn_implementation=model_opt.attn_implementation,
-    #     torch_dtype=torch.bfloat16,
-    # ).eval()
-
-    # [RAG]
-    # generation_config = init_generation_config(model_opt, tokenizer_g)
+    cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
+    ada_retriever = SparseAdaptiveEncoders(q_encoder=cattn_encoder, n_candidates=train_opt.n_max_candidates)
 
     from options import LLMOptions
     from modeling.llm import vLLM
     llm_opt = LLMOptions()
-    generator = vLLM(llm_opt)
+    generator = vLLM(model=model_opt.generator_name_or_path)
 
     # [Data]
     train_opt.dataset_prefix = data_opt.train_file.lower()

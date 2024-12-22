@@ -51,7 +51,7 @@ class SparseEncoder(nn.Module):
             output_hidden_states=True,
         )
 
-        if self.add_cross_attention:
+        if (self.add_cross_attention) and (encoder_hidden_states is not None):
             last_hidden_states = self.crossattentionlayer(
                 hidden_states=outputs[0],
                 attention_mask=attention_mask,

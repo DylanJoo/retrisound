@@ -51,10 +51,10 @@ class CrossAttentionLayer(nn.Module):
         v = shape(encoder_hidden_states)
         
         attention_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        attention_scores = attention_scores.masked_fill(
-            encoder_attention_mask[:, None, None, :] == 0,
-            float('-inf')
-        )
+        # attention_scores = attention_scores.masked_fill(
+        #     encoder_attention_mask[:, None, None, :] == 0,
+        #     float('-inf')
+        # )
 
         # select only k
         attention_probs = F.softmax(attention_scores, dim=-1)
@@ -66,4 +66,4 @@ class CrossAttentionLayer(nn.Module):
 
         context_hidden_states = context_layer + hidden_states
         
-        return (context_hidden_states, attention_scores, combined) 
+        return (context_hidden_states, attention_scores)
