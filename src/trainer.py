@@ -65,7 +65,7 @@ class Trainer(Trainer_hf):
         hits = self.searcher.batch_search(
             logits=query.clone().float().detach().cpu().numpy(), 
             q_ids=[str(i) for i in range(query.size()[0])],
-            k=self.args.n_contexts,
+            k=self.args.n_max_candidates,
             threads=32
         )
         hits = {int(k): v for k, v in hits.items()}
@@ -81,7 +81,7 @@ class Trainer(Trainer_hf):
             reward = self.measure_ranking(pids, truth[i])
             rewards.append(reward)
 
-        rewards = torch.tensor(rewards) # B 1 
+        rewards = torch.tensor(rewards)
         return rewards, candidates
 
     def compute_loss_feedback(self, questions, contexts):
@@ -123,7 +123,7 @@ class Trainer(Trainer_hf):
 
         ### sampling
         reps = []
-        ct_losses = []
+        ct_losses = 0
         logprobs = []
         rewards = []
         for t in range(0, self.args.num_steps+1):
@@ -135,7 +135,7 @@ class Trainer(Trainer_hf):
                     q_masks=retriever_inputs['q_masks'][0], 
                     step=0
                 )
-                reward, candidates = self.compute_loss_reward(
+                reward_0, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
                 )
                 feedback = self.compute_loss_feedback(questions, candidates)
@@ -160,21 +160,17 @@ class Trainer(Trainer_hf):
                     output.reps, questions, truth=qrels
                 )
                 feedback = self.compute_loss_feedback(questions, candidates) 
-                ct_losses.append(output.loss_ct)
-
-                reps.append(output.reps)
+                ct_losses += output.loss_ct
                 rewards.append(reward)
+
+            reps.append(output.reps)
 
             # [NOTE] here we use the last sample as the stored feedback
             for j in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[j], feedback[j])
 
-        rewards = torch.stack(rewards, 1)
-        contrastive_loss = torch.stack(ct_losses)
-        # for name, param in model.named_parameters():
-        #     if param.requires_grad:
-        #         print(f"{name} gradient: {param.grad}")
-        contrastive_loss = contrastive_loss.mean()
+        rewards = torch.stack(rewards, 0)
+        contrastive_loss = ct_losses
         loss = (contrastive_loss * self.args.ct_coef) 
 
         self.log({"train/reward": rewards.mean().item()})
@@ -190,14 +186,22 @@ class Trainer(Trainer_hf):
         print('\nFeedback: ', self.train_dataset.feedbacks[data_indices[0]])
 
         print('\n\nTop-k terms vs rewards')
+        print(rewards.shape)
 
         for i in range(len(reps)):
             t = self.tokenizer.batch_decode(
                 torch.argsort(reps[i], -1, descending=True)[0, :15]
             )
-            r = rewards[0][i].tolist()
+            if i == 0:
+                r = reward_0[0].tolist()
+            else:
+                r = rewards[i-1, 0].tolist()
             print(r, t)
         print('---')
+
+        for n, p in model.named_parameters():
+            if ('crossattention' in n) and ('proj.weight' in n):
+                print(p)
 
         ## logging
         if self.accelerator.is_main_process:

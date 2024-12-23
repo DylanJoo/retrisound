@@ -79,7 +79,7 @@ def main():
         data_collator=data_collator,
     )
     trainer.train()
-    # trainer.save_model(train_opt.output_dir)
+    trainer.save_model(train_opt.output_dir)
 
 if __name__ == '__main__':
     main()

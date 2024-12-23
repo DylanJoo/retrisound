@@ -80,13 +80,17 @@ class PRFDataset(Dataset):
         return self.length
 
     def add_feedback(self, idx, fbk):
-        try:
-            i = self.feedbacks[idx].index("") # empty strings
-            self.feedbacks[idx][i] = fbk
-            self.n_feedbacks[idx] += 1
-        except: # means it's full
-            self.feedbacks[idx] = [fbk] + ["" for _ in range(self.n_max_segments-1)] 
-            self.n_feedbacks[idx] = 1
+        n = self.n_feedbacks[idx]
+        self.feedbacks[idx][n] = fbk 
+        self.n_feedbacks[idx] += 1
+
+        # try:
+        #     self.n_feedbacks[idx] += 1
+        #     i = self.feedbacks[idx].index("") # empty strings
+        #     self.feedbacks[idx][i] = fbk
+        # except: # means it's full
+        #     self.feedbacks[idx] = [fbk] + ["" for _ in range(self.n_max_segments-1)] 
+        #     self.n_feedbacks[idx] = 1
 
     def add_judgements(self, idx, judgements, info=None):
         id = self.ids[idx]

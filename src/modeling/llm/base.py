@@ -18,7 +18,7 @@ class vLLM:
             model, 
             dtype='half',
             enforce_eager=True,
-            tensor_parallel_size=num_gpus
+            tensor_parallel_size=num_gpus,
         )
         self.sampling_params = SamplingParams(
             temperature=temperature, 
@@ -29,7 +29,7 @@ class vLLM:
     def generate(self, x, **kwargs):
         self.sampling_params.max_tokens = kwargs.pop('max_tokens', 256)
         self.sampling_params.min_tokens = kwargs.pop('min_tokens', 32)
-        outputs = self.model.generate(x, self.sampling_params)
+        outputs = self.model.generate(x, self.sampling_params, use_tqdm=False)
         if len(outputs) > 1:
             return [o.outputs[0].text for o in outputs]
         else:

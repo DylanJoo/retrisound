@@ -39,7 +39,7 @@ class SparseAdaptiveEncoders(nn.Module):
         loss_ct, loss_mr = None, None
 
         if (step == 0) and (prev_output is None):
-            output = self.q_encoder(q_tokens, q_masks)
+            prev_output = output = self.q_encoder(q_tokens, q_masks)
         else:
             f_output = self.q_encoder(f_tokens, f_masks)
             output = self.q_encoder(
@@ -51,11 +51,19 @@ class SparseAdaptiveEncoders(nn.Module):
 
             ## residual
             if prev_output is not None:
-                output.reps += prev_output.reps
+                # option 1
+                # output.reps += prev_output.reps
+
+                # option 2
+                logits = output.logits + prev_output.logits
+                output.reps, _ = torch.max(
+                    torch.log(1 + torch.relu(logits)) 
+                    * q_masks.unsqueeze(-1), dim=1
+                )
 
             # encode positive and negative 
             batch_size, vocab_size = output.reps.shape
-            CELoss = nn.CrossEntropyLoss(reduction='mean')
+            CELoss = nn.CrossEntropyLoss()
             MRLoss = nn.MarginRankingLoss() 
 
             if d_tokens is not None:
@@ -88,7 +96,8 @@ class SparseAdaptiveEncoders(nn.Module):
             d_reps=d_reps,
             loss_ct=loss_ct,
             loss_mr=loss_mr,
-            logs={'InfoNCE': loss_ct}
+            logs={'InfoNCE': loss_ct},
+            logits=output.logits,
         )
 
     def gradient_checkpointing_enable(self, **kwargs):

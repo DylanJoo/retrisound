@@ -38,7 +38,6 @@ class DenseAdaptiveEncoderOutput(BaseModelOutput):
 class SparseAdaptiveEncoderOutput(BaseModelOutput):
     reps: torch.FloatTensor = None
     logprobs: torch.FloatTensor = None
-    values: torch.FloatTensor = None
     actions: Optional[torch.FloatTensor] = None
     prev_out: Optional[SparseEncoderOutput] = None
     q_out: Optional[SparseEncoderOutput] = None
@@ -49,4 +48,4 @@ class SparseAdaptiveEncoderOutput(BaseModelOutput):
     loss_sft: torch.FloatTensor = None
     scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
-
+    logits: torch.FloatTensor = None

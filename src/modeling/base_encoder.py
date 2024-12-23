@@ -14,7 +14,7 @@ class SparseEncoder(nn.Module):
         self.add_cross_attention = kwargs.pop('cross_attention', False)
         if self.add_cross_attention:
             config = AutoConfig.from_pretrained(model_name_or_path)
-            self.crossattentionlayer = CrossAttentionLayer(config)
+            self.crossattentionlayer = CrossAttentionLayer(config, zero_init=True)
         else:
             config = None
         self.model = BertForMaskedLM.from_pretrained(model_name_or_path, config=config)

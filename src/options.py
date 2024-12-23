@@ -12,14 +12,14 @@ class ModelOptions:
     n_negative_samples: Optional[int] = field(default=0)
     fixed_d_encoder: Optional[bool] = field(default=False)
     attn_implementation: Literal[None, 'sdpa', 'flash_attention_2'] = field(default=None)
-    num_mem_tokens: Optional[int] = field(default=16)
     tau: Optional[float] = field(default=1.0)
-    num_budget: Optional[int] = field(default=5)
     max_new_tokens: Optional[int] = field(default=32)
     fusion_type: Optional[str] = field(default='ff')
     zero_init: bool = field(default=False)
-    sft: bool = field(default=False)
-    samples: int = field(default=1)
+    # num_budget: Optional[int] = field(default=5)
+    # sft: bool = field(default=False)
+    # samples: int = field(default=1)
+    # num_mem_tokens: Optional[int] = field(default=16)
 
 @dataclass
 class DataOptions:
