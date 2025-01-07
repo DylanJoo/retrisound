@@ -9,7 +9,7 @@ class ModelOptions:
     faiss_index_dir: Optional[str] = field(default="")
     lucene_index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
-    n_negative_samples: Optional[int] = field(default=0)
+    n_negative_samples: Optional[int] = field(default=1)
     fixed_d_encoder: Optional[bool] = field(default=False)
     attn_implementation: Literal[None, 'sdpa', 'flash_attention_2'] = field(default=None)
     tau: Optional[float] = field(default=1.0)
@@ -54,6 +54,7 @@ class ReinforceOptions(RewardConfig):
     ct_coef: Optional[float] = field(default=0.0)
     mr_coef: Optional[float] = field(default=0.0)
     rl_coef: Optional[float] = field(default=1.0)
+    reg_coef: Optional[float] = field(default=1.0)
     reward_type: str = field(default='normal')
 
 @dataclass

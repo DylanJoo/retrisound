@@ -10,7 +10,7 @@ import numpy as np
 import scipy
 from tqdm import tqdm
 
-from pyserini.index.lucene import Document, IndexReader
+from pyserini.index.lucene import Document
 from pyserini.pyclass import autoclass, JFloat, JInt, JArrayList, JHashMap
 from pyserini.search.lucene import JScoredDoc
 from pyserini.util import download_prebuilt_index, download_encoded_corpus
@@ -40,6 +40,7 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         self.num_docs = self.object.get_total_num_docs()
         self.encoder_type = 'pytorch'
         self.prebuilt_index_name = prebuilt_index_name
+        self.device = device
 
         # encoder attributres
         self.tokenizer = AutoTokenizer.from_pretrained(query_encoder or 'naver/splade-v3')

@@ -16,6 +16,11 @@ from ir_measures import nDCG, R
 from tqdm import tqdm
 import pickle
 
+def transform_ids_to_vector(inputs, tokenizer):
+    vector = torch.zeros(inputs.size(0), tokenizer.vocab_size)
+    vector = vector.scatter(1, inputs, 1)
+    return vector
+
 def batch_iterator(iterable, size=1, return_index=False):
     l = len(iterable)
     for ndx in range(0, l, size):
@@ -98,8 +103,13 @@ def evaluate(args):
             padding=True,
             return_tensors='pt'
         ).to(args.device)
-        q_outputs = ada_encoder(q_inputs['input_ids'], q_inputs['attention_mask']) 
-        q_reps = q_outputs.reps
+
+        # BERT-based query encoder
+        if 'doc' in args.d_encoder_name:
+            q_reps = transform_ids_to_vector(q_inputs.input_ids, tokenizer)
+        else:
+            q_outputs = ada_encoder(q_inputs['input_ids'], q_inputs['attention_mask']) 
+            q_reps = q_outputs.reps
 
         ## iterative search -- 1
         hits = searcher.batch_search(

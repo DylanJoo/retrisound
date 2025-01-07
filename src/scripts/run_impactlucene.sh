@@ -3,7 +3,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --nodes=1
 #SBATCH --mem=32G
-#SBATCH --array=1-13%4
+#SBATCH --array=1-2%1
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=06:00:00
 #SBATCH --output=%x.%j.out
@@ -18,12 +18,12 @@ cd ~/retrisound/src/
 MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 
 each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
-echo $each
 
+echo $each
 python -m pyserini.index.lucene \
   --collection JsonVectorCollection \
-  --input ${INDEX_DIR}/beir-cellar/${each}.encoded \
-  --index ${INDEX_DIR}/beir-cellar/${each}.lucene \
+  --input ${INDEX_DIR}/${each}.encoded_doc \
+  --index ${INDEX_DIR}/${each}.lucene_doc \
   --generator DefaultLuceneDocumentGenerator \
   --threads 36 \
   --storeDocvectors --impact --pretokenized

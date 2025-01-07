@@ -41,16 +41,24 @@ from utils import (
 
 class Trainer(Trainer_hf):
 
-    def __init__(self, generator, index_dir=None, **kwargs):
+    def __init__(self, generator, index_dir=None, dense=False, lexical=False, **kwargs):
         super().__init__(**kwargs)
         self.generator = generator
-        self.searcher = load_searcher(index_dir, lexical=True)
-        # self._move_model_to_device(self.generator, self.args.device)
+        self.searcher = load_searcher(
+            index_dir, 
+            lexical=lexical,
+            dense=dense
+        )
+
+        if dense:
+            self.rep_type = 'dense'
+        elif lexical:
+            self.rep_type = 'sparse'
 
     def measure_ranking(self, pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
         run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
-        result = ir_measures.calc_aggregate([nDCG@10], qrel, run)[nDCG@10]
+        result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[R@10]
         return result
 
     def compute_loss_reward(
@@ -58,27 +66,38 @@ class Trainer(Trainer_hf):
         query, 
         questions,
         truth=None,
-        reward_type='normal'
     ):
         gen_batch = (self.args.generation_batch or 1)
 
-        hits = self.searcher.batch_search(
-            logits=query.clone().float().detach().cpu().numpy(), 
-            q_ids=[str(i) for i in range(query.size()[0])],
-            k=self.args.n_max_candidates,
-            threads=32
-        )
+        if self.rep_type == 'dense':
+            hits = self.searcher.batch_search(
+                queries=query.clone().float().detach().cpu().numpy(), 
+                q_ids=[str(i) for i in range(query.size()[0])],
+                k=self.args.n_max_candidates,
+                threads=32
+            )
+        elif self.rep_type == 'sparse':
+            hits = self.searcher.batch_search(
+                logits=query.clone().float().detach().cpu().numpy(), 
+                q_ids=[str(i) for i in range(query.size()[0])],
+                k=self.args.n_max_candidates,
+                threads=32
+            )
         hits = {int(k): v for k, v in hits.items()}
         hits = dict(sorted(hits.items()))
 
         rewards = []
         candidates = []
-        for i, key in enumerate(hits):
+        for i, key in enumerate([int(k) for k in range(query.size()[0])]):
+            try: 
+                pids = [h.docid for h in hits[key]]
+                candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
+                reward = self.measure_ranking(pids, truth[i])
+            except: # no retrieved results
+                candidate = []
+                reward = 0.0
 
-            pids = [h.docid for h in hits[key]]
-            candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
             candidates.append(candidate)
-            reward = self.measure_ranking(pids, truth[i])
             rewards.append(reward)
 
         rewards = torch.tensor(rewards)
@@ -124,6 +143,7 @@ class Trainer(Trainer_hf):
         ### sampling
         reps = []
         ct_losses = 0
+        reg_losses = 0
         logprobs = []
         rewards = []
         for t in range(0, self.args.num_steps+1):
@@ -138,7 +158,11 @@ class Trainer(Trainer_hf):
                 reward_0, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
                 )
-                feedback = self.compute_loss_feedback(questions, candidates)
+
+                feedback = []
+                for i, qrel in enumerate(qrels):
+                    feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
+                # feedback = self.compute_loss_feedback(questions, candidates)
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -159,8 +183,12 @@ class Trainer(Trainer_hf):
                 reward, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
                 )
-                feedback = self.compute_loss_feedback(questions, candidates) 
-                ct_losses += output.loss_ct
+                feedback = []
+                for i, qrel in enumerate(qrels):
+                    feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
+                # feedback = self.compute_loss_feedback(questions, candidates)
+                ct_losses += output.loss_ct 
+                reg_losses += output.loss_flop 
                 rewards.append(reward)
 
             reps.append(output.reps)
@@ -171,23 +199,26 @@ class Trainer(Trainer_hf):
 
         rewards = torch.stack(rewards, 0)
         contrastive_loss = ct_losses
-        loss = (contrastive_loss * self.args.ct_coef) 
+        regularization_loss = reg_losses
+        loss = (contrastive_loss * self.args.ct_coef) + (regularization_loss * self.args.reg_coef)
 
+        self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})
         self.log({"loss/RL": 0})
         self.log({"loss/CT": contrastive_loss.mean().item()})
+        self.log({"loss/REG": regularization_loss.mean().item()})
         self.log({"loss/MR": 0})
 
         print('---')
-        print('\nquestion: ', questions[0])
         print('\nDocument +/- ', self.train_dataset[data_indices[0]]['contexts'])
-        print('\nRetrieved doc (q0):', [c['text'][:30] for c in candidates_0[0]])
-        print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
+        # print('\nRetrieved doc (q0):', [c['text'][:30] for c in candidates_0[0]])
+        # print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
+        print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
+        print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
         print('\nFeedback: ', self.train_dataset.feedbacks[data_indices[0]])
 
+        print('\nquestion: ', questions[0])
         print('\n\nTop-k terms vs rewards')
-        print(rewards.shape)
-
         for i in range(len(reps)):
             t = self.tokenizer.batch_decode(
                 torch.argsort(reps[i], -1, descending=True)[0, :15]
@@ -198,10 +229,6 @@ class Trainer(Trainer_hf):
                 r = rewards[i-1, 0].tolist()
             print(r, t)
         print('---')
-
-        for n, p in model.named_parameters():
-            if ('crossattention' in n) and ('proj.weight' in n):
-                print(p)
 
         ## logging
         if self.accelerator.is_main_process:

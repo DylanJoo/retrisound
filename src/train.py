@@ -18,7 +18,6 @@ from transformers import (
     HfArgumentParser,
     AutoConfig,
     AutoTokenizer,
-    AutoModelForCausalLM,
     SchedulerType,
     get_scheduler,
     set_seed
@@ -37,17 +36,28 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    from modeling import SparseEncoder
-    tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-
+    from modeling import SparseEncoder, Contriever
     from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
+    encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
     cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
-    ada_retriever = SparseAdaptiveEncoders(q_encoder=cattn_encoder, n_candidates=train_opt.n_max_candidates)
+    # encoder = Contriever(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
+    # cattn_encoder = Contriever(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
+    ada_retriever = SparseAdaptiveEncoders(
+        q_encoder=cattn_encoder, 
+        encoder=encoder,
+        n_candidates=train_opt.n_max_candidates
+    )
+
+    ada_retriever = SparseAdaptiveEncoders(
+        q_encoder=cattn_encoder, 
+        encoder=encoder,
+        n_candidates=train_opt.n_max_candidates
+    )
 
     from options import LLMOptions
     from modeling.llm import vLLM
     llm_opt = LLMOptions()
-    generator = vLLM(model=model_opt.generator_name_or_path)
+    generator = vLLM(model=model_opt.generator_name_or_path, temperature=0.3)
 
     # [Data]
     train_opt.dataset_prefix = data_opt.train_file.lower()
@@ -57,13 +67,14 @@ def main():
         dataset_dir=data_opt.train_file, 
         split=data_opt.split,
         n_max_segments=train_opt.n_max_segments,
-        n_max_candidates=train_opt.n_max_candidates,
+        n_negative_samples=model_opt.n_negative_samples,
         retrieval_file=data_opt.retrieval_file,
         judgement_file=data_opt.judgement_file,
         quick_test=train_opt.quick_test,
     )
 
     ## data ollator
+    tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
     data_collator = PRFCollator(tokenizer=tokenizer_r)
 
     # [trainer]
@@ -77,6 +88,8 @@ def main():
         tokenizer=tokenizer_r,
         train_dataset=train_dataset,
         data_collator=data_collator,
+        lexical=True if 'splade' in model_opt.retriever_name_or_path else False,
+        dense=True if 'splade' not in model_opt.retriever_name_or_path else False
     )
     trainer.train()
     trainer.save_model(train_opt.output_dir)

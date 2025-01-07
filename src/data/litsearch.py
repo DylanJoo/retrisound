@@ -1,4 +1,3 @@
-import json
 import datetime
 import torch
 import numpy as np
@@ -6,7 +5,6 @@ from glob import glob
 from tqdm import tqdm
 from torch.utils.data import Dataset
 from collections import defaultdict
-from datasets import load_dataset
 from dataclasses import dataclass, field
 from typing import Optional, Union, List, Dict, Tuple, Any
 from transformers import DefaultDataCollator
@@ -16,22 +14,24 @@ from transformers.tokenization_utils_base import (
 )
 import sys
 
-class ContextQADataset(Dataset):
+from datasets import load_dataset
+
+class PRFDataset(Dataset):
 
     def __init__(
         self, 
-        dataset_name, 
-        n_max_segments=10,
-        depth=30,
-        corpus_file=None,
+        dataset_dir, 
+        split='test',
+        n_max_segments=10, # n_max_feedback
+        n_max_candidates=2,
         retrieval_file=None,
         judgement_file=None,
         quick_test=None,
-        half_with_bottom=False
+        **kwargs
     ):
-        with open(data_file, 'r') as f:
-            raw_data = json.load(f)['train']
-
+        query = load_from_disk(f"{dataset_dir}/query")
+        query = {}
+        corpus_clean_data  corpus_s2orc_data  query
         data = []
         for key_id in raw_data:
             data.append({

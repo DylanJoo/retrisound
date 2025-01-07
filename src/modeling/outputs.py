@@ -5,8 +5,9 @@ from transformers.modeling_outputs import BaseModelOutput
 
 @dataclass
 class DenseEncoderOutput(BaseModelOutput):
-    emb: torch.FloatTensor = None
+    reps: torch.FloatTensor = None
     last_hidden_states: torch.FloatTensor = None
+    logits: torch.FloatTensor = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 @dataclass
@@ -15,6 +16,7 @@ class SparseEncoderOutput(BaseModelOutput):
     logits: torch.FloatTensor = None
     mask: torch.FloatTensor = None
     last_hidden_states: torch.FloatTensor = None
+    mlm_hidden_states: torch.FloatTensor = None
     all_hidden_states: torch.FloatTensor = None
 
 @dataclass
@@ -45,7 +47,7 @@ class SparseAdaptiveEncoderOutput(BaseModelOutput):
     loss: torch.FloatTensor = None
     loss_ct: torch.FloatTensor = None
     loss_mr: torch.FloatTensor = None
-    loss_sft: torch.FloatTensor = None
+    loss_flop: torch.FloatTensor = None
     scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
     logits: torch.FloatTensor = None

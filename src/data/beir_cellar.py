@@ -15,7 +15,6 @@ from transformers.tokenization_utils_base import (
 import sys
 
 from beir.datasets.data_loader import GenericDataLoader
-from .utils import load_corpus_file
 
 class PRFDataset(Dataset):
 
@@ -24,7 +23,7 @@ class PRFDataset(Dataset):
         dataset_dir, 
         split='test',
         n_max_segments=10, # n_max_feedback
-        n_max_candidates=2,
+        n_negative_samples=2,
         retrieval_file=None,
         judgement_file=None,
         quick_test=None,
@@ -52,7 +51,7 @@ class PRFDataset(Dataset):
 
         ## training attributes
         self.n_max_segments = n_max_segments
-        self.n_max_candidates = n_max_candidates
+        self.n_negative_samples = n_negative_samples
 
         ## dynamic attributes
         self.n_feedbacks = [0] * self.length
@@ -83,14 +82,6 @@ class PRFDataset(Dataset):
         n = self.n_feedbacks[idx]
         self.feedbacks[idx][n] = fbk 
         self.n_feedbacks[idx] += 1
-
-        # try:
-        #     self.n_feedbacks[idx] += 1
-        #     i = self.feedbacks[idx].index("") # empty strings
-        #     self.feedbacks[idx][i] = fbk
-        # except: # means it's full
-        #     self.feedbacks[idx] = [fbk] + ["" for _ in range(self.n_max_segments-1)] 
-        #     self.n_feedbacks[idx] = 1
 
     def add_judgements(self, idx, judgements, info=None):
         id = self.ids[idx]
@@ -139,7 +130,7 @@ class PRFDataset(Dataset):
                 'query': query,
                 'feedbacks': self.feedbacks[idx],
                 'n_feedbacks': n, 
-                'contexts': [positives, negatives][:self.n_max_candidates],}
+                'contexts': [positives, negatives][:self.n_negative_samples],}
 
 @dataclass
 class PRFCollator(DefaultDataCollator):
@@ -185,6 +176,7 @@ class PRFCollator(DefaultDataCollator):
             batch_feedback_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
             feedback_q = self.tokenizer.batch_encode_plus(
                 [fbk for fbk in batch_feedback_q],
+                # list(zip([f['query'] for f in features], [fbk for fbk in batch_feedback_q])),
                 add_special_tokens=True,
                 max_length=self.max_src_length,
                 truncation=self.truncation,
