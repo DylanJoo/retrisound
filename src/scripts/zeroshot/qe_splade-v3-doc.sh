@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=zs
+#SBATCH --job-name=zsqr
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -15,7 +15,7 @@ conda activate retrisound
 cd /home/dju/retrisound/src/
 
 # Setups
-RETRIEVER=naver/splade-v3
+RETRIEVER=naver/splade-v3-doc
 MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 
 # Generate embeddings
@@ -23,13 +23,13 @@ each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 echo $each
 
 python3 BEIR_eval.py \
-    --dataset_dir /home/dju/datasets/beir-cellar/${each} \
-    --index_dir /home/dju/indexes/beir-cellar/${each}.lucene \
+    --dataset_dir /home/dju/datasets/${each} \
+    --index_dir /home/dju/indexes/${each}.lucene_doc \
     --d_encoder_name $RETRIEVER \
-    --q_encoder_name_or_path $RETRIEVER \
     --generator_name meta-llama/Llama-3.2-1B-Instruct \
     --split test \
     --batch_size 4 \
-    --iteration 1 --expansion 1 --prompt_type qe \
+    --prompt_type qe \
+    --iteration 1  --repeat_query 1 \
     --device cuda \
-    --exp debug
+    --exp query-expand

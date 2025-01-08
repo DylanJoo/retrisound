@@ -16,9 +16,12 @@ from ir_measures import nDCG, R
 from tqdm import tqdm
 import pickle
 
-def transform_ids_to_vector(inputs, tokenizer):
-    vector = torch.zeros(inputs.size(0), tokenizer.vocab_size)
-    vector = vector.scatter(1, inputs, 1)
+def transform_ids_to_vector(inputs, tokenizer, count=False):
+    vector = torch.zeros(inputs.size(0), tokenizer.vocab_size).to(inputs.device)
+    if count:
+        vector = vector.scatter_add(1, inputs, torch.ones_like(inputs, dtype=vector.dtype))
+    else:
+        vector = vector.scatter(1, inputs, 1)
     return vector
 
 def batch_iterator(iterable, size=1, return_index=False):
@@ -63,13 +66,10 @@ def postprocess_output(output, tag='q'):
 EXAMPLE = ""
 prompt = {
 "qe": "Write a list of keywords for the given text.\nText: {}\nKeywords: ",
-"prf_qe": "Write a list of keywords for the given text. Extract keywords from the provided references.\n\n" + EXAMPLE + \
-        "Text: {}\nReferences:{} \nKeywords: ",
-"qr": "Rewrite the text and make it easier for search engine to find relevant information.\nText: {}\nRewritten text: ",
-"q2r": "Write an accurate, engaging, and concise report for the given topic.\n\n" + EXAMPLE + \
-        "Topic: {}\nReport: ",
-"prf_q2r": "Write an accurate, engaging, and concise report for the given topic. The search results are provided as references.\n\n" + EXAMPLE + \
-        "Topic: {}\nContext: {}\nReport: ",
+"qr": "Refine and rewrite the text into a query for search engine to find relevant information.\nText: {}\nRewritten query: ",
+"rg": "Write an accurate, engaging, and concise report for the given topic.\n\n" + EXAMPLE + "Topic: {}\nReport: ",
+"prf_qe": "Write a list of keywords for the given text. Extract keywords from the provided references.\n\n" + EXAMPLE +  "Text: {}\nReferences:{} \nKeywords: ",
+"prf_q2r": "Write an accurate, engaging, and concise report for the given topic. The search results are provided as references.\n\n" + EXAMPLE + "Topic: {}\nContext: {}\nReport: ",
 }
 
 @torch.no_grad()
@@ -91,7 +91,7 @@ def evaluate(args):
 
     # inference runs by searching
     runs = {}
-    for batch_q_ids in tqdm(batch_iterator(q_ids, args.batch_size)):
+    for batch_q_ids in tqdm(batch_iterator(q_ids, args.batch_size), total=len(q_ids)//args.batch_size + 1):
         batch_q_texts = [queries[id] for id in batch_q_ids]
 
         # proces queries and produce reprs.
@@ -106,7 +106,7 @@ def evaluate(args):
 
         # BERT-based query encoder
         if 'doc' in args.d_encoder_name:
-            q_reps = transform_ids_to_vector(q_inputs.input_ids, tokenizer)
+            q_reps = transform_ids_to_vector(q_inputs.input_ids, tokenizer, count=True)
         else:
             q_outputs = ada_encoder(q_inputs['input_ids'], q_inputs['attention_mask']) 
             q_reps = q_outputs.reps
@@ -128,11 +128,13 @@ def evaluate(args):
                 docs = apply_docs_prompt([corpus[h.docid] for h in hits[id][:args.top_k]])
                 prf_prompts.append(prompt[args.prompt_type].format(query, docs))
 
-            prf = generator.generate(prf_prompts, max_tokens=64, min_tokens=0)
+            prf = generator.generate(prf_prompts, max_tokens=512, min_tokens=0)
             batch_o_texts = [postprocess_output(o, tag='q') for o in prf]
 
-            #### expansion (or not)
-            batch_o_texts = [(q * args.expansion + " " + o).strip() for (q, o) in zip(batch_q_texts, batch_o_texts)]
+            #### Repear (or not)
+            batch_o_texts = [
+                (q * args.repeat_query + " " + o).strip() for (q, o) in zip(batch_q_texts, batch_o_texts)
+            ]
 
             #### demonstration
             for o, q in zip(batch_o_texts, batch_q_texts):
@@ -199,12 +201,13 @@ if __name__ == '__main__':
     parser.add_argument("--generator_name", type=str, default='meta-llama/Llama-3.2-1B-Instruct')
     parser.add_argument("--top_k", type=int, default=5)
     parser.add_argument("--iteration", type=int, default=0) 
-    parser.add_argument("--expansion", type=int, default=0)
+    parser.add_argument("--repeat_query", type=int, default=0)
     parser.add_argument("--prompt_type", type=str, default='qr')
     parser.add_argument("--adaptive", action='store_true', default=False) # leaned or zero-shot
     parser.add_argument("--context_masking", action='store_true', default=False)
 
     parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--save_pickle", action='store_true', default=False)
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--device", type=str, default='cuda') 
     parser.add_argument("--debug", type=int, default=None)
@@ -213,11 +216,11 @@ if __name__ == '__main__':
 
     runs, results = evaluate(args)
     print(f" ============= ")
-    print(f"## [Data path] {args.dataset_dir}")
-    print(f"## [Rd] {args.d_encoder_name} [Rq] {args.q_encoder_name_or_path} [G] {args.generator_name}")
+    print(f" [Data path] {args.dataset_dir}")
+    print(f" [Rd] {args.d_encoder_name} [Rq] {args.q_encoder_name_or_path} [G] {args.generator_name}")
     print(f"### {args.dataset_dir.split('/')[-1]} | {args.exp} | {results[0]:.4f} | {results[1]:.4f} |")
     print(f" ============= ")
 
-    # save runs
-    # with open( f'run-{args.exp}.pickle', 'wb') as f:
-    #     pickle.dump(runs, f, pickle.HIGHEST_PROTOCOL)
+    if args.save_pickle:
+        with open( f'run-{args.exp}.pickle', 'wb') as f:
+            pickle.dump(runs, f, pickle.HIGHEST_PROTOCOL)

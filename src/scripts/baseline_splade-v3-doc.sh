@@ -27,8 +27,7 @@ python3 BEIR_eval.py \
     --index_dir /home/dju/indexes/${each}.lucene_doc \
     --d_encoder_name $RETRIEVER \
     --split test \
-    --top_k 100 \
-    --iteration 0 \
     --batch_size 32 \
+    --iteration 0 \
     --device cpu \
     --exp ${each}-baseline-doc
