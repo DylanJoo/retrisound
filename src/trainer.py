@@ -38,7 +38,6 @@ from transformers import Trainer as Trainer_hf
 import ir_measures
 from ir_measures import nDCG, R
 from utils import (
-    augmentation_response,
     augmentation_feedback,
     load_searcher
 )
@@ -159,8 +158,8 @@ class Trainer(Trainer_hf):
         ct_losses = 0
         reg_losses = 0
         tc_losses = 0
-        logprobs = []
         rewards = []
+        logs = []
         for t in range(0, self.args.num_steps+1):
 
             if t == 0:
@@ -196,7 +195,7 @@ class Trainer(Trainer_hf):
                     step=t,
                 )
                 output.reps = transform_ids_to_vector(
-                    output.reps, self.tokenizer, count=False
+                    output.reps, self.tokenizer, count=True
                 )
                 reward, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
@@ -207,6 +206,7 @@ class Trainer(Trainer_hf):
                 reg_losses += output.loss_flop 
                 tc_losses += output.loss_tc
                 rewards.append(reward)
+                logs.append(output.logs['PosRatio'])
 
             reps.append(output.reps)
 
@@ -215,6 +215,7 @@ class Trainer(Trainer_hf):
                 self.train_dataset.add_feedback(data_indices[j], feedback[j])
 
         rewards = torch.stack(rewards, 0)
+        logs = torch.stack(logs, 0)
         contrastive_loss = ct_losses
         token_classification_loss = tc_losses
         regularization_loss = reg_losses
@@ -223,6 +224,7 @@ class Trainer(Trainer_hf):
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})
+        self.log({"train/pos_ratio": logs.mean().item()})
         self.log({"loss/RL": 0})
         self.log({"loss/CT": contrastive_loss.mean().item()})
         self.log({"loss/TC": token_classification_loss.mean().item()})

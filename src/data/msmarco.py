@@ -14,36 +14,24 @@ from transformers.tokenization_utils_base import (
     PreTrainedTokenizerBase,
     PaddingStrategy, 
 )
-from .utils import load_corpus_file, batch_iterator # normal use case
 # from utils import load_corpus_file, batch_iterator # normal use case
 import sys
 
-class ContextQADataset(Dataset):
+from beir.datasets.data_loader import GenericDataLoader
+
+class IRDataset(Dataset):
 
     def __init__(
         self, 
-        data_file, 
-        n_max_segments=10,
-        n_max_candidates=10,
-        depth=30,
-        corpus_file=None,
+        dataset_dir, 
+        split='test',
+        n_max_segments=10, 
+        n_negative_samples=2,
         retrieval_file=None,
         judgement_file=None,
         quick_test=None,
-        half_with_bottom=False
+        **kwargs
     ):
-        with open(data_file, 'r') as f:
-            raw_data = json.load(f)['train']
-
-        data = []
-        for key_id in raw_data:
-            data.append({
-                "sample_id": key_id,
-                "question": raw_data[key_id]['ambiguous_question'],
-                "last_answer": raw_data[key_id]['annotations'][0]['long_answer'],
-                "sub_questions": [i['question'] for i in raw_data[key_id]['qa_pairs']],
-                "sub_answers": [i['short_answers'][0] for i in raw_data[key_id]['qa_pairs']],
-            })
 
         self.quick_test = quick_test 
         self.length = len(data)

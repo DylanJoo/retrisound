@@ -73,6 +73,7 @@ class SparseAdaptiveEncoders(nn.Module):
     ):
         q_reps, d_reps = None, []
         loss_tc, loss_flop, loss_ct, loss_mr = None, None, None, None
+        pos_ratio = 0
 
         if (step == 0) and (prev_output is None):
             prev_output = output = self.encoder(q_tokens, q_masks)
@@ -101,9 +102,8 @@ class SparseAdaptiveEncoders(nn.Module):
             if d_tokens is not None:
                 d_reps = self.encoder(d_tokens[0], d_masks[0]).indices
                 labels = make_labels(d_reps, candidate_tokens, candidate_masks)
-                print('output.logits', output.logits)
-                print('labels', labels)
-                loss_ce = CELoss(output.logits.view(-1, 2), labels.view(-1))
+                loss_tc = CELoss(output.logits.view(-1, 2), labels.view(-1))
+                pos_ratio = (labels==1).sum()  / (labels!=-100).sum()
 
         return SparseAdaptiveEncoderOutput(
             reps=reps,
@@ -113,7 +113,7 @@ class SparseAdaptiveEncoders(nn.Module):
             loss_mr=torch.tensor([0.0]),
             loss_flop=torch.tensor([0.0]),
             loss_tc=loss_tc,
-            logs={'InfoNCE': loss_ct},
+            logs={'InfoNCE': loss_ct, 'PosRatio': pos_ratio},
             logits=output.logits,
         )
 

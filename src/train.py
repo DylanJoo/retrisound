@@ -60,7 +60,7 @@ def main():
     if model_opt.generator_name_or_path is None:
         generator = dummyLLM()
     else:
-        generator = vLLM(model=model_opt.generator_name_or_path, temperature=0.3)
+        generator = vLLM(model=model_opt.generator_name_or_path, temperature=0.7)
 
     # [Data]
     train_opt.dataset_prefix = data_opt.train_file.lower()

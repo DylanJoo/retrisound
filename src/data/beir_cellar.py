@@ -13,6 +13,7 @@ from transformers.tokenization_utils_base import (
     PaddingStrategy, 
 )
 import sys
+import csv
 
 from beir.datasets.data_loader import GenericDataLoader
 
@@ -22,9 +23,9 @@ class PRFDataset(Dataset):
         self, 
         dataset_dir, 
         split='test',
-        n_max_segments=10, # n_max_feedback
+        n_max_segments=10, 
         n_negative_samples=2,
-        retrieval_file=None,
+        another_split_for_eval=None,
         judgement_file=None,
         quick_test=None,
         **kwargs
@@ -37,6 +38,18 @@ class PRFDataset(Dataset):
         self.dataset_dir = dataset_dir
         self.corpus = corpus
         self.split = split
+
+        # load another additional qrels if needed.
+        if (another_split_for_eval is not None) and (split == 'train'):
+            qrels_file = os.path.join(self.qrels_folder, another_split_for_eval + ".tsv")
+            reader = csv.reader(open(qrels_file, encoding="utf-8"), delimiter="\t", quoting=csv.QUOTE_MINIMAL)
+            next(reader)
+            for id, row in enumerate(reader):
+                query_id, corpus_id, score = row[0], row[1], int(row[2])
+                if query_id not in self.eval_qrels:
+                    self.eval_qrels[query_id] = {corpus_id: score}
+                else:
+                    self.eval_qrels[query_id][corpus_id] = score
 
         if split != 'test':
             self.length = len(self.queries)
@@ -57,23 +70,10 @@ class PRFDataset(Dataset):
         self.n_feedbacks = [0] * self.length
         self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
 
-        ## load prerun judgements
-        self.judgements = {}
-        for id in self.ids:
-            self.judgements[id] = defaultdict(int)
-        self._load_judgement(judgement_file)
-
-    def _load_judgement(self, file):
-        file = (file or f'/home/dju/temp/judge-{datetime.datetime.now().strftime("%b%d-%I%m")}.txt')
-        self.judgement_file = file
-        try:
-            with open(file, 'r') as f:
-                for line in tqdm(f):
-                    id, psgid, judge = line.strip().split()[:3]
-                    self.judgements[id][psgid] = judge
-        except:
-            with open(file, 'w') as f:
-                f.write("id\tpid\tj\tinfo\n")
+        # self.judgements = {}
+        # for id in self.ids:
+        #     self.judgements[id] = defaultdict(int)
+        # self._load_judgement(judgement_file)
 
     def __len__(self):
         return self.length
@@ -82,19 +82,6 @@ class PRFDataset(Dataset):
         n = self.n_feedbacks[idx]
         self.feedbacks[idx][n] = fbk 
         self.n_feedbacks[idx] += 1
-
-    def add_judgements(self, idx, judgements, info=None):
-        id = self.ids[idx]
-        with open(self.judgement_file, 'a') as f:
-            for pid in judgements:
-                j = judgements[pid]
-
-                if pid in self.qrels[id]:
-                    judgements[pid] = 1
-                    continue
-
-                self.judgements[id][pid] = j
-                f.write(f"{id}\t{pid}\t{j}\t{info}\n")
 
     def get_random_crop(self):
         crops = {}
@@ -114,23 +101,50 @@ class PRFDataset(Dataset):
             positives = self.corpus[id]
         else:
             query = self.queries[id]
-            true_positive_ids = list(self.qrels[id].keys())
-            positive_id = random.sample(true_positive_ids, 1)[0]
-            positives = self.corpus[positive_id]
+            candidate_positive_ids = [pid for pid, score in self.qrels[id].items() if int(score) >= 1]
+            positive_id = random.sample(candidate_positive_ids, 1)[0]
+            positive = self.corpus[positive_id]
 
         try:
-            negative_id = random.sample([k for k, v in self.judgements[id].items() if v == 0], 1)[0]
-            negatives = self.corpus[negative_id]
+            candidate_negative_ids = [pid for pid, score in self.qrels[id].items() if score < 1]
+            negative_ids = random.sample(candidate_negative_ids, self.n_negative_samples)
+            negatives = [self.corpus[pid] for pid in negative_ids]
         except:
-            negative_id = random.sample(self.corpus_ids, 1)[0]
-            negatives = self.corpus[negative_id]
+            negative_ids = random.sample(self.corpus_ids, self.n_negative_samples)[0]
+            negatives = [self.corpus[pid] for pid in negative_ids]
 
         # outputs
         return {'index': idx,
                 'query': query,
                 'feedbacks': self.feedbacks[idx],
                 'n_feedbacks': n, 
-                'contexts': [positives, negatives][:self.n_negative_samples],}
+                'contexts': [positive] + negatives }
+
+    # def _load_judgement(self, file):
+    #     file = (file or f'/home/dju/temp/judge-{datetime.datetime.now().strftime("%b%d-%I%m")}.txt')
+    #     self.judgement_file = file
+    #     try:
+    #         with open(file, 'r') as f:
+    #             for line in tqdm(f):
+    #                 id, psgid, judge = line.strip().split()[:3]
+    #                 self.judgements[id][psgid] = judge
+    #     except:
+    #         with open(file, 'w') as f:
+    #             f.write("id\tpid\tj\tinfo\n")
+
+    # def add_judgements(self, idx, judgements, info=None):
+    #     id = self.ids[idx]
+    #     with open(self.judgement_file, 'a') as f:
+    #         for pid in judgements:
+    #             j = judgements[pid]
+    #
+    #             if pid in self.qrels[id]:
+    #                 judgements[pid] = 1
+    #                 continue
+    #
+    #             self.judgements[id][pid] = j
+    #             f.write(f"{id}\t{pid}\t{j}\t{info}\n")
+
 
 @dataclass
 class PRFCollator(DefaultDataCollator):

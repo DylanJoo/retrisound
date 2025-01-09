@@ -55,23 +55,26 @@ def prepare_encoder(args):
     tokenizer = AutoTokenizer.from_pretrained(args.d_encoder_name)
     return biencoders, tokenizer
 
-def postprocess_output(output, tag='q'):
+def postprocess_output(output, tag='p'):
     output = output.split(f'</{tag}>')[0]
+    output = output.split('Query:')[0]
     output = output.split('\n')[0]
     output = re.sub(r"\d+\.\s", "", output).strip()
     output = re.sub(r"-\s", "", output).strip()
     return output
 
+# prompt_report_gen = "Write a summarized report about the topic of the given query. Use the provided search results (ignore the irrelevant result) to draft the report within 200 words."
+# template_report_gen = "{prompt_report}\n\Query: {Q}\n\nSearch results:\n{D}\nReport:\n "
 # query rewriting
 EXAMPLE = ""
 prompt = {
-"qe": "Write a list of keywords for the given text.\nText: {}\nKeywords: ",
-"qr": "Refine and rewrite the text into a query for search engine to find relevant information.\nText: {}\nRewritten query: ",
-"rg": "Write an accurate, engaging, and concise report for the given topic.\n\n" + EXAMPLE + "Topic: {}\nReport: ",
-"prf_qe": "Write a list of keywords for the given text. Extract keywords from the provided references.\n\n" + EXAMPLE +  "Text: {}\nReferences:{} \nKeywords: ",
-"prf_q2r": "Write an accurate, engaging, and concise report for the given topic. The search results are provided as references.\n\n" + EXAMPLE + "Topic: {}\nContext: {}\nReport: ",
+"qe": "Write a list of keywords for the given text.\nText: {}\nKeywords:\n ",
+"qr": "Refine and rewrite the text into a query for search engine to find relevant information.\nText: {}\nRewritten query:\n ",
+"rg": "Write a passage that answers the given query. Write the passage within the `<p>` and `</p>` tags.\n\nQuery: {}\nPassage:<p>",
+"prf-rg": "Write a report that answers the given query. Only use the provided search results (some of them might be irrelevant, please ignore). Draft a report within 200 words.\n\n" + EXAMPLE + "Query: {}\nSearch results:\n{}\nReport:\n ",
 }
 
+# prompt_report_gen = "Write a report to answer the given query. Use the provided search results (ignore the irrelevant result) to draft the answer within 200 words."
 @torch.no_grad()
 def evaluate(args):
     """ only made for evaluting query encoder, and the documents have already been indexed.  
@@ -129,7 +132,7 @@ def evaluate(args):
                 prf_prompts.append(prompt[args.prompt_type].format(query, docs))
 
             prf = generator.generate(prf_prompts, max_tokens=512, min_tokens=0)
-            batch_o_texts = [postprocess_output(o, tag='q') for o in prf]
+            batch_o_texts = [postprocess_output(o, tag='p') for o in prf]
 
             #### Repear (or not)
             batch_o_texts = [

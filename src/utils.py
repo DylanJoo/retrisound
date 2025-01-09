@@ -34,28 +34,27 @@ def update_tokenizer(tokenizer, pad_token='[PAD]'):
 
     return tokenizer
 
-def augmentation_response(
-    questions, 
-    candidates, 
-    n_context,
-    answers=None,
-    independent=False
-):
-    # prepare prompts
-    prompts = []
-    if independent:
-        for j in range(len(candidates)):
-            d = apply_docs_prompt([candidates[j]], field='text')
-            prompt = apply_rsp_inst_prompt(Q=questions, D=d)
-            prompts.append(prompt)
-    else:
-        contexts = [clist[:n_context] for clist in candidates] 
-        for i in range(len(questions)):
-            D = apply_docs_prompt(contexts[i], field='text')
-            prompt = apply_rsp_inst_prompt(Q=questions[i], D=D)
-            prompts.append(prompt)
-
-    return prompts
+# def augmentation_response(
+#     questions, 
+#     candidates, 
+#     n_context,
+#     answers=None,
+#     independent=False
+# ):
+#     # prepare prompts
+#     prompts = []
+#     if independent:
+#         for j in range(len(candidates)):
+#             d = apply_docs_prompt([candidates[j]], field='text')
+#             prompt = apply_rsp_inst_prompt(Q=questions, D=d)
+#             prompts.append(prompt)
+#     else:
+#         contexts = [clist[:n_context] for clist in candidates] 
+#         for i in range(len(questions)):
+#             D = apply_docs_prompt(contexts[i], field='text')
+#             prompt = apply_rsp_inst_prompt(Q=questions[i], D=D)
+#             prompts.append(prompt)
+#     return prompts
 
 def augmentation_feedback(
     questions, 

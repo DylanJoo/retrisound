@@ -3,7 +3,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --nodes=1
 #SBATCH --mem=32G
-#SBATCH --array=1-2%1
+#SBATCH --array=17-17%1
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=06:00:00
 #SBATCH --output=%x.%j.out

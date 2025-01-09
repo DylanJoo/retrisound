@@ -21,6 +21,7 @@ class vLLM:
             dtype='half',
             enforce_eager=True,
             tensor_parallel_size=num_gpus,
+            gpu_memory_utilization=0.5
         )
         self.sampling_params = SamplingParams(
             temperature=temperature, 
@@ -40,12 +41,15 @@ class vLLM:
 class dummyLLM:
 
     def generate(self, inputs):
-        outputs = []
-        for input in inputs:
-            strings = input.split()
-            random.shuffle(strings)
-            outputs.append( " ".join(strings[:100]) )
-        return outputs
+        if len(inputs[0]) > 512:
+            outputs = []
+            for input in inputs:
+                strings = input.split()
+                random.shuffle(strings)
+                outputs.append( " ".join(strings[:100]) )
+            return outputs
+        else:
+            return inputs
 
 class LLM:
 
@@ -90,7 +94,6 @@ class LLM:
             eos_token_id=stop_token_ids
         )
         generation = self.tokenizer.decode(outputs[0][inputs['input_ids'].size(1):], skip_special_tokens=True)
-        # generation = self.postprocess(generation)
         del inputs, outputs
         torch.cuda.empty_cache()
         return generation
