@@ -1,1 +1,1 @@
-from .base import vLLM, LLM
+from .base import vLLM, LLM, dummyLLM

@@ -70,7 +70,7 @@ class SparseAdaptiveEncoders(nn.Module):
                 pass
 
                 # option 1
-                # output.reps = (output.reps + prev_output.reps) / 2
+                output.reps = (output.reps + prev_output.reps) / 2
 
                 # option 2
                 # logits = (output.logits + prev_output.logits) / 2
@@ -79,7 +79,7 @@ class SparseAdaptiveEncoders(nn.Module):
                 #     * q_masks.unsqueeze(-1), dim=1
                 # )
 
-            ## top-1024 masking
+            ## top-1024 masking (remove if using doc-version splade)
             # topk_values, topk_indices = torch.topk(output.reps, 1024, dim=1)
             # topk_mask = torch.zeros_like(output.reps, dtype=torch.bool)
             # topk_mask.scatter_(1, topk_indices, True)

@@ -5,12 +5,13 @@ import torch.nn.functional as F
 from typing import List
 
 class STEFunction(torch.autograd.Function):
+
     @staticmethod
-    def forward(ctx, input):
+    def forward(self, input):
         return (input > 0).float()
 
     @staticmethod
-    def backward(ctx, grad_output):
+    def backward(self, grad_output):
         return F.hardtanh(grad_output)
 
 class CrossAttentionLayer(nn.Module):
@@ -54,16 +55,12 @@ class CrossAttentionLayer(nn.Module):
         
         def shape(x):
             return x.view(batch_size, -1, self.num_attention_heads, self.head_dim).permute(0, 2, 1, 3)
-        
-        # revised
-        encoder_hidden_states = torch.cat([hidden_states, encoder_hidden_states], 1)
-        encoder_attention_mask = torch.cat([attention_mask, encoder_attention_mask], 1)
 
         # B N_head L H_head
         q = shape(self.q_proj(hidden_states))
         k = shape(self.k_proj(encoder_hidden_states))
-        v = shape(encoder_hidden_states)
-        # v = shape(self.v_proj(encoder_hidden_states))
+        # v = shape(encoder_hidden_states)
+        v = shape(self.v_proj(encoder_hidden_states))
         # k = shape(encoder_hidden_states)
         
         attention_scores = torch.matmul(q, k.transpose(-1, -2)) / math.sqrt(self.head_dim)

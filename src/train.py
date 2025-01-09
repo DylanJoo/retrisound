@@ -36,28 +36,31 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    from modeling import SparseEncoder, Contriever
-    from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
-    encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
+    # from modeling import SparseEncoder, Contriever
+    # from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
+    # encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
+    # cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
+    # ada_retriever = SparseAdaptiveEncoders(
+    #     q_encoder=cattn_encoder, 
+    #     encoder=encoder,
+    #     n_candidates=train_opt.n_max_candidates
+    # )
+    from modeling.base_encoder_new import SparseEncoder
+    # from modeling.base_encoder import SparseEncoder
+    from modeling.biencoders.sparse_doc_crossattn import SparseAdaptiveEncoders
     cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
-    # encoder = Contriever(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
-    # cattn_encoder = Contriever(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
     ada_retriever = SparseAdaptiveEncoders(
         q_encoder=cattn_encoder, 
-        encoder=encoder,
-        n_candidates=train_opt.n_max_candidates
-    )
-
-    ada_retriever = SparseAdaptiveEncoders(
-        q_encoder=cattn_encoder, 
-        encoder=encoder,
         n_candidates=train_opt.n_max_candidates
     )
 
     from options import LLMOptions
-    from modeling.llm import vLLM
+    from modeling.llm import vLLM, dummyLLM
     llm_opt = LLMOptions()
-    generator = vLLM(model=model_opt.generator_name_or_path, temperature=0.3)
+    if model_opt.generator_name_or_path is None:
+        generator = dummyLLM()
+    else:
+        generator = vLLM(model=model_opt.generator_name_or_path, temperature=0.3)
 
     # [Data]
     train_opt.dataset_prefix = data_opt.train_file.lower()
@@ -78,6 +81,7 @@ def main():
     data_collator = PRFCollator(tokenizer=tokenizer_r)
 
     # [trainer]
+    os.environ["WANDB_PROJECT"] = train_opt.wandb_project
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
     from trainer import Trainer
     trainer = Trainer(

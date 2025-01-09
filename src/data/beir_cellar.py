@@ -176,7 +176,6 @@ class PRFCollator(DefaultDataCollator):
             batch_feedback_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
             feedback_q = self.tokenizer.batch_encode_plus(
                 [fbk for fbk in batch_feedback_q],
-                # list(zip([f['query'] for f in features], [fbk for fbk in batch_feedback_q])),
                 add_special_tokens=True,
                 max_length=self.max_src_length,
                 truncation=self.truncation,

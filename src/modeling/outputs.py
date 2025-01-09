@@ -14,6 +14,8 @@ class DenseEncoderOutput(BaseModelOutput):
 class SparseEncoderOutput(BaseModelOutput):
     reps: torch.FloatTensor = None
     logits: torch.FloatTensor = None
+    weights: torch.FloatTensor = None
+    indices: torch.FloatTensor = None
     mask: torch.FloatTensor = None
     last_hidden_states: torch.FloatTensor = None
     mlm_hidden_states: torch.FloatTensor = None
@@ -48,6 +50,7 @@ class SparseAdaptiveEncoderOutput(BaseModelOutput):
     loss_ct: torch.FloatTensor = None
     loss_mr: torch.FloatTensor = None
     loss_flop: torch.FloatTensor = None
+    loss_tc: torch.FloatTensor = None
     scores: Optional[torch.FloatTensor] = None
     logs: Optional[Dict[str, torch.FloatTensor]] = None
     logits: torch.FloatTensor = None

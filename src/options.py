@@ -5,7 +5,7 @@ from typing import Optional, Union, Tuple, Literal
 @dataclass
 class ModelOptions:
     retriever_name_or_path: Optional[str] = field(default="")
-    generator_name_or_path: Optional[str] = field(default="")
+    generator_name_or_path: Optional[str] = field(default=None)
     faiss_index_dir: Optional[str] = field(default="")
     lucene_index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
@@ -30,9 +30,10 @@ class DataOptions:
     split: Optional[str] = field(default=None)
     depth: Optional[int] = field(default=30)
 
-from trl.trainer.reward_config import RewardConfig
+# from trl.trainer.reward_config import RewardConfig
+from transformers import TrainingArguments
 @dataclass
-class ReinforceOptions(RewardConfig):
+class ReinforceOptions(TrainingArguments):
     output_dir: str = field(default='/ivi/ilps/personal/dju/checkpoints/')
     n_contexts: Optional[int] = field(default=5)
     n_max_segments: Optional[int] = field(default=2)

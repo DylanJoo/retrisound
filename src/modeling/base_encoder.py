@@ -15,15 +15,10 @@ class SparseEncoder(nn.Module):
         self.model = BertForMaskedLM.from_pretrained(model_name_or_path)
 
         if self.add_cross_attention:
-            # after
             config = AutoConfig.from_pretrained(model_name_or_path)
             self.crossattentionlayer = nn.ModuleList(
                 [CrossAttentionLayer(config, zero_init=False, mono_attend=False) for _ in range(1)]
             )
-            # self.crossattentionlayer = CrossAttentionLayer(
-            #     config, zero_init=False, mono_attend=False
-            # )
-
             # all [REVISE]
             # config = AutoConfig.from_pretrained(model_name_or_path)
             # config.is_decoder=True

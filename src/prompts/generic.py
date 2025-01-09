@@ -1,6 +1,6 @@
 # context template
 doc_prompt_template = "[{ID}]{T}{P}\n"
-doc_prompt_template = "{T}{P}\n"
+# doc_prompt_template = "{T}{P}\n"
 def apply_docs_prompt(doc_items, field='text'):
     p = ""
     for idx, doc_item in enumerate(doc_items):

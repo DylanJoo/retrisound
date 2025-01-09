@@ -5,11 +5,13 @@ from tqdm import tqdm
 import time
 import string
 import re
+import random
 from nltk import sent_tokenize
 
 from vllm import LLM as v_llm 
 from vllm import SamplingParams
 from transformers import AutoTokenizer
+
 
 class vLLM:
 
@@ -34,6 +36,16 @@ class vLLM:
             return [o.outputs[0].text for o in outputs]
         else:
             return [outputs[0].outputs[0].text]
+
+class dummyLLM:
+
+    def generate(self, inputs):
+        outputs = []
+        for input in inputs:
+            strings = input.split()
+            random.shuffle(strings)
+            outputs.append( " ".join(strings[:100]) )
+        return outputs
 
 class LLM:
 

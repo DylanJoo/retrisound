@@ -28,7 +28,11 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.utils import logging, is_peft_available
+logger = logging.get_logger(__name__)
+import safetensors.torch
 
+from peft import PeftModel
 from transformers.modeling_utils import PreTrainedModel
 from transformers import Trainer as Trainer_hf
 import ir_measures
@@ -38,6 +42,14 @@ from utils import (
     augmentation_feedback,
     load_searcher
 )
+
+def transform_ids_to_vector(inputs, tokenizer, count=False):
+    vector = torch.zeros(inputs.size(0), tokenizer.vocab_size).to(inputs.device)
+    if count:
+        vector = vector.scatter_add(1, inputs, torch.ones_like(inputs, dtype=vector.dtype))
+    else:
+        vector = vector.scatter(1, inputs, 1)
+    return vector
 
 class Trainer(Trainer_hf):
 
@@ -54,6 +66,8 @@ class Trainer(Trainer_hf):
             self.rep_type = 'dense'
         elif lexical:
             self.rep_type = 'sparse'
+            if 'doc' in index_dir:
+                self.rep_type = 'sparse_doc'
 
     def measure_ranking(self, pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
@@ -69,14 +83,14 @@ class Trainer(Trainer_hf):
     ):
         gen_batch = (self.args.generation_batch or 1)
 
-        if self.rep_type == 'dense':
+        if 'dense' in self.rep_type:
             hits = self.searcher.batch_search(
                 queries=query.clone().float().detach().cpu().numpy(), 
                 q_ids=[str(i) for i in range(query.size()[0])],
                 k=self.args.n_max_candidates,
                 threads=32
             )
-        elif self.rep_type == 'sparse':
+        elif 'sparse' in self.rep_type:
             hits = self.searcher.batch_search(
                 logits=query.clone().float().detach().cpu().numpy(), 
                 q_ids=[str(i) for i in range(query.size()[0])],
@@ -144,6 +158,7 @@ class Trainer(Trainer_hf):
         reps = []
         ct_losses = 0
         reg_losses = 0
+        tc_losses = 0
         logprobs = []
         rewards = []
         for t in range(0, self.args.num_steps+1):
@@ -155,14 +170,14 @@ class Trainer(Trainer_hf):
                     q_masks=retriever_inputs['q_masks'][0], 
                     step=0
                 )
+                output.reps = transform_ids_to_vector(
+                    output.reps, self.tokenizer, count=False
+                )
                 reward_0, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
                 )
 
-                feedback = []
-                for i, qrel in enumerate(qrels):
-                    feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
-                # feedback = self.compute_loss_feedback(questions, candidates)
+                feedback = self.compute_loss_feedback(questions, candidates)
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -180,15 +195,17 @@ class Trainer(Trainer_hf):
                     prev_output=q_out,
                     step=t,
                 )
+                output.reps = transform_ids_to_vector(
+                    output.reps, self.tokenizer, count=False
+                )
                 reward, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
                 )
-                feedback = []
-                for i, qrel in enumerate(qrels):
-                    feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
-                # feedback = self.compute_loss_feedback(questions, candidates)
+                feedback = self.compute_loss_feedback(questions, candidates)
+
                 ct_losses += output.loss_ct 
                 reg_losses += output.loss_flop 
+                tc_losses += output.loss_tc
                 rewards.append(reward)
 
             reps.append(output.reps)
@@ -199,13 +216,16 @@ class Trainer(Trainer_hf):
 
         rewards = torch.stack(rewards, 0)
         contrastive_loss = ct_losses
+        token_classification_loss = tc_losses
         regularization_loss = reg_losses
-        loss = (contrastive_loss * self.args.ct_coef) + (regularization_loss * self.args.reg_coef)
+        # loss = (contrastive_loss * self.args.ct_coef) + (regularization_loss * self.args.reg_coef)
+        loss = token_classification_loss
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})
         self.log({"loss/RL": 0})
         self.log({"loss/CT": contrastive_loss.mean().item()})
+        self.log({"loss/TC": token_classification_loss.mean().item()})
         self.log({"loss/REG": regularization_loss.mean().item()})
         self.log({"loss/MR": 0})
 
@@ -246,3 +266,28 @@ class Trainer(Trainer_hf):
             }
         return loss
 
+    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        # If we are executing this function, we are the process zero, so we don't check for that.
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Saving model checkpoint to {output_dir}")
+
+        ## only save the query encoder
+        supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+
+        if state_dict is None:
+            state_dict = self.model.q_encoder.state_dict()
+
+        if isinstance(self.accelerator.unwrap_model(self.model.q_encoder), supported_classes):
+            self.accelerator.unwrap_model(self.model.q_encoder).save_pretrained(
+                output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+            )
+        else:
+            logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
+            if self.args.save_safetensors:
+                # safetensors.torch.save_file(
+                #     state_dict, os.path.join(output_dir, 'model.safetensors'), metadata={"format": "pt"}
+                # )
+                safetensors.torch.save_model(self.model.q_encoder, os.path.join(output_dir, 'model.safetensors'))
+            else:
+                torch.save(state_dict, os.path.join(output_dir, 'pytorch_model.bin'))
