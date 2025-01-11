@@ -48,6 +48,9 @@ def transform_ids_to_vector(inputs, tokenizer, count=False):
         vector = vector.scatter_add(1, inputs, torch.ones_like(inputs, dtype=vector.dtype))
     else:
         vector = vector.scatter(1, inputs, 1)
+    # clean the added tokens
+    for tok, idx in tokenizer.get_added_vocab().items():
+        vector[:, idx] = 0
     return vector
 
 class Trainer(Trainer_hf):
@@ -155,6 +158,7 @@ class Trainer(Trainer_hf):
 
         ### sampling
         reps = []
+        logprobs = []
         ct_losses = 0
         reg_losses = 0
         tc_losses = 0
@@ -170,7 +174,7 @@ class Trainer(Trainer_hf):
                     step=0
                 )
                 output.reps = transform_ids_to_vector(
-                    output.reps, self.tokenizer, count=False
+                    output.reps, self.tokenizer, count=True
                 )
                 reward_0, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
@@ -205,8 +209,12 @@ class Trainer(Trainer_hf):
                 ct_losses += output.loss_ct 
                 reg_losses += output.loss_flop 
                 tc_losses += output.loss_tc
+
                 rewards.append(reward)
                 logs.append(output.logs['PosRatio'])
+
+                # reinforcement
+                logprobs.append(output.logprobs) # B L 2
 
             reps.append(output.reps)
 
@@ -214,18 +222,22 @@ class Trainer(Trainer_hf):
             for j in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[j], feedback[j])
 
-        rewards = torch.stack(rewards, 0)
         logs = torch.stack(logs, 0)
+        logprobs = torch.stack(logprobs, 0)
+        rewards = torch.stack(rewards, 0).to(logprobs.device)
+
         contrastive_loss = ct_losses
         token_classification_loss = tc_losses
         regularization_loss = reg_losses
+        reinforce_loss = (rewards * (-logprobs)).mean()
         # loss = (contrastive_loss * self.args.ct_coef) + (regularization_loss * self.args.reg_coef)
-        loss = token_classification_loss
+
+        loss = token_classification_loss  + (reinforce_loss * self.args.rl_coef)
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})
         self.log({"train/pos_ratio": logs.mean().item()})
-        self.log({"loss/RL": 0})
+        self.log({"loss/RL": reinforce_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
         self.log({"loss/TC": token_classification_loss.mean().item()})
         self.log({"loss/REG": regularization_loss.mean().item()})
@@ -233,10 +245,10 @@ class Trainer(Trainer_hf):
 
         print('---')
         print('\nDocument +/- ', self.train_dataset[data_indices[0]]['contexts'])
-        # print('\nRetrieved doc (q0):', [c['text'][:30] for c in candidates_0[0]])
-        # print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
-        print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
-        print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
+        print('\nRetrieved doc (q0):', [c['text'][:30] for c in candidates_0[0]])
+        print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
+        # print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
+        # print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
         print('\nFeedback: ', self.train_dataset.feedbacks[data_indices[0]])
 
         print('\nquestion: ', questions[0])

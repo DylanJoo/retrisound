@@ -6,18 +6,22 @@ def apply_docs_prompt(doc_items, field='text'):
         p_doc = doc_prompt_template
         p_doc = p_doc.replace("{ID}", str(idx+1))
         title = doc_item.get('title', '')
-        if title != '':
-            p_doc = p_doc.replace("{T}", f" (Title: {title}) ")
-        else:
+        if title == '' or title is None:
             p_doc = p_doc.replace("{T}", "")
+        else:
+            p_doc = p_doc.replace("{T}", f" (Title: {title}) ")
         p_doc = p_doc.replace("{P}", doc_item[field])
         p += p_doc
     return p
 
 
 ### prompts for feedback
-prompt_report_gen = "Write a report to answer the given query. Use the provided search results (ignore the irrelevant result) to draft the answer within 200 words."
-template_report_gen = "{prompt_report}\n\nQuery: {Q}\nSearch results:\n{D}\nReport:\n "
+prompt_report_gen = "Write a passage that answer the given query. Use the provided search results to draft the answer (some of them might be irrelevant). Cite the documents if they are relevant. Write the passage within 100 words."
+template_report_gen = "{prompt_report}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage: "
+
+prompt_report_gen = "Rewrite the query with comprehensive contexts, making it easier to understand. Useful information could be found in the given texts (but some of which might be irrelevant)."
+template_report_gen = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
+
 def apply_fbk_inst_prompt(Q, D, prefix="Report:\n"):
     p = template_report_gen.replace('{prompt_report}', prompt_report_gen)
     p = p.replace("{Q}", Q).replace("{D}", D)

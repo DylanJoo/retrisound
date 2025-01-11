@@ -38,6 +38,23 @@ class SubsetOperator(torch.nn.Module):
 
         return res
 
+def sample_actions(logits, samples=1, attention_mask=None):
+    actions, logprobs = [], []
+    probs = logits.softmax(-1)
+    m = torch.distributions.one_hot_categorical.OneHotCategorical(probs)
+
+    for i in range(samples):
+        if i == (samples - 1): 
+            action = torch.zeros_like(logits).scatter_(2, logits.argmax(-1).unsqueeze(-1), 1.)
+            action = action.type(logits.dtype)
+        else:
+            action = m.sample()
+
+        actions.append(action)
+        logprob = m.log_prob(action).mean(-1)
+        logprobs.append(logprob)
+    return actions, logprobs
+
 def multiple_sample_and_log_probability(
     scores, 
     sample_size, 

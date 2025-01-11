@@ -79,9 +79,13 @@ class PRFDataset(Dataset):
         return self.length
 
     def add_feedback(self, idx, fbk):
-        n = self.n_feedbacks[idx]
-        self.feedbacks[idx][n] = fbk 
-        self.n_feedbacks[idx] += 1
+        if self.n_feedbacks[idx] == len(self.feedbacks[idx]):
+            self.n_feedbacks[idx] = 1
+            self.feedbacks[idx]= [fbk] + [self.feedbacks[idx][:self.n_max_segments]
+        else:
+            n = self.n_feedbacks[idx]
+            self.feedbacks[idx][n] = fbk 
+            self.n_feedbacks[idx] += 1
 
     def get_random_crop(self):
         crops = {}
@@ -110,7 +114,7 @@ class PRFDataset(Dataset):
             negative_ids = random.sample(candidate_negative_ids, self.n_negative_samples)
             negatives = [self.corpus[pid] for pid in negative_ids]
         except:
-            negative_ids = random.sample(self.corpus_ids, self.n_negative_samples)[0]
+            negative_ids = random.sample(self.corpus_ids, self.n_negative_samples)
             negatives = [self.corpus[pid] for pid in negative_ids]
 
         # outputs

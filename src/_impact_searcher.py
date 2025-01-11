@@ -45,6 +45,7 @@ class LuceneImpactSearcher(_LuceneImpactSearcher):
         # encoder attributres
         self.tokenizer = AutoTokenizer.from_pretrained(query_encoder or 'naver/splade-v3')
         self.reverse_voc = {v: k for k, v in self.tokenizer.vocab.items()}
+        self.query_encoder = query_encoder
         self.weight_range = 5
         self.quant_range = 256
 

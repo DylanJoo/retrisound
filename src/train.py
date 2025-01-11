@@ -36,7 +36,7 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    # from modeling import SparseEncoder, Contriever
+    # from modeling.base_encoder import SparseEncoder
     # from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
     # encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
     # cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
@@ -46,7 +46,6 @@ def main():
     #     n_candidates=train_opt.n_max_candidates
     # )
     from modeling.base_encoder_new import SparseEncoder
-    # from modeling.base_encoder import SparseEncoder
     from modeling.biencoders.sparse_doc_crossattn import SparseAdaptiveEncoders
     cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
     ada_retriever = SparseAdaptiveEncoders(
