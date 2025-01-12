@@ -19,10 +19,6 @@ class SparseEncoder(nn.Module):
             self.crossattentionlayer = nn.ModuleList(
                 [CrossAttentionLayer(config, zero_init=False, mono_attend=False) for _ in range(1)]
             )
-            # all [REVISE]
-            # config = AutoConfig.from_pretrained(model_name_or_path)
-            # config.is_decoder=True
-            # config.add_cross_attention=True
 
         self.output = kwargs.pop('output', 'MLM')
         self.agg = kwargs.pop('agg', 'max')

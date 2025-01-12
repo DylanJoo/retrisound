@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=10:00:00
+#SBATCH --time=05:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -24,8 +24,10 @@ MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
 MODEL_SIZE=1B
 BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
-# dataset=litsearch
-dataset=msmarco-passage
+# BASE_LLM=meta-llama/Llama-3.1-8B-Instruct
+dataset=litsearch
+# dataset=msmarco-passage
+# dataset=beir-cellar/scidocs
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
 echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
@@ -33,8 +35,8 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --config_file configs/default_config.yaml \
-    --main_process_port 29502 \
-    train.py \
+    --main_process_port 29500 \
+    train2.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --train_file $DATASET_DIR/${dataset} \
@@ -50,7 +52,7 @@ accelerate launch \
     --report_to wandb \
     --generation_batch 4 \
     --n_contexts 5 --n_max_candidates 10 --n_negative_samples 2 \
-    --num_steps 5 --n_max_segments 15 \
+    --num_steps 2 --n_max_segments 15 \
     --ct_coef 0.0 \
     --reg_coef 0.0 \
     --mr_coef 0.0 \

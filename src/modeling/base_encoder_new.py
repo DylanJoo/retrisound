@@ -68,24 +68,24 @@ class SparseEncoder(nn.Module):
                 # )[0]
 
                 # option1: query+feedback as candidate
-                candidate_hidden = torch.cat([last_hidden_states, encoder_hidden_states], 1)
-                candidate_mask = torch.cat([attention_mask, encoder_attention_mask], 1)
-                last_hidden_states = layer_module(
-                    hidden_states=candidate_hidden,
-                    attention_mask=candidate_mask,
-                    encoder_hidden_states=candidate_hidden,
-                    encoder_attention_mask=candidate_mask, 
-                )[0]
+                # candidate_hidden = torch.cat([last_hidden_states, encoder_hidden_states], 1)
+                # candidate_mask = torch.cat([attention_mask, encoder_attention_mask], 1)
+                # last_hidden_states = layer_module(
+                #     hidden_states=candidate_hidden,
+                #     attention_mask=candidate_mask,
+                #     encoder_hidden_states=candidate_hidden,
+                #     encoder_attention_mask=candidate_mask, 
+                # )[0]
                     # encoder_hidden_states=last_hidden_states,
                     # encoder_attention_mask=attention_mask, 
 
                 # option2: feedback as candidate
-                # last_hidden_states = layer_module(
-                #     hidden_states=encoder_hidden_states,
-                #     attention_mask=encoder_attention_mask,
-                #     encoder_hidden_states=last_hidden_states,
-                #     encoder_attention_mask=attention_mask, 
-                # )[0]
+                last_hidden_states = layer_module(
+                    hidden_states=encoder_hidden_states,
+                    attention_mask=encoder_attention_mask,
+                    encoder_hidden_states=last_hidden_states,
+                    encoder_attention_mask=attention_mask, 
+                )[0]
 
             tok_logits = self.crossattention_cls(last_hidden_states)
             nonzero_indices = None

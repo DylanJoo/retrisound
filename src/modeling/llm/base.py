@@ -15,13 +15,13 @@ from transformers import AutoTokenizer
 
 class vLLM:
 
-    def __init__(self, model, temperature=0.7, top_p=0.9, num_gpus=1):
+    def __init__(self, model, temperature=0.7, top_p=0.9, num_gpus=1, gpu_memory_utilization=0.75):
         self.model = v_llm(
             model, 
             dtype='half',
             enforce_eager=True,
             tensor_parallel_size=num_gpus,
-            gpu_memory_utilization=0.5
+            gpu_memory_utilization=gpu_memory_utilization
         )
         self.sampling_params = SamplingParams(
             temperature=temperature, 

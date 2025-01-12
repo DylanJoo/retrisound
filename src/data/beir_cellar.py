@@ -70,18 +70,13 @@ class PRFDataset(Dataset):
         self.n_feedbacks = [0] * self.length
         self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
 
-        # self.judgements = {}
-        # for id in self.ids:
-        #     self.judgements[id] = defaultdict(int)
-        # self._load_judgement(judgement_file)
-
     def __len__(self):
         return self.length
 
     def add_feedback(self, idx, fbk):
         if self.n_feedbacks[idx] == len(self.feedbacks[idx]):
             self.n_feedbacks[idx] = 1
-            self.feedbacks[idx]= [fbk] + [self.feedbacks[idx][:self.n_max_segments]
+            self.feedbacks[idx]= ([fbk] + self.feedbacks[idx])[:self.n_max_segments]
         else:
             n = self.n_feedbacks[idx]
             self.feedbacks[idx][n] = fbk 
@@ -124,31 +119,6 @@ class PRFDataset(Dataset):
                 'n_feedbacks': n, 
                 'contexts': [positive] + negatives }
 
-    # def _load_judgement(self, file):
-    #     file = (file or f'/home/dju/temp/judge-{datetime.datetime.now().strftime("%b%d-%I%m")}.txt')
-    #     self.judgement_file = file
-    #     try:
-    #         with open(file, 'r') as f:
-    #             for line in tqdm(f):
-    #                 id, psgid, judge = line.strip().split()[:3]
-    #                 self.judgements[id][psgid] = judge
-    #     except:
-    #         with open(file, 'w') as f:
-    #             f.write("id\tpid\tj\tinfo\n")
-
-    # def add_judgements(self, idx, judgements, info=None):
-    #     id = self.ids[idx]
-    #     with open(self.judgement_file, 'a') as f:
-    #         for pid in judgements:
-    #             j = judgements[pid]
-    #
-    #             if pid in self.qrels[id]:
-    #                 judgements[pid] = 1
-    #                 continue
-    #
-    #             self.judgements[id][pid] = j
-    #             f.write(f"{id}\t{pid}\t{j}\t{info}\n")
-
 
 @dataclass
 class PRFCollator(DefaultDataCollator):
@@ -178,7 +148,7 @@ class PRFCollator(DefaultDataCollator):
 
         # Query
         ## Initial query
-        initial_q = self.tokenizer.batch_encode_plus(
+        initial_q = self.tokenizer(
             [f['query'] for f in features],
             add_special_tokens=True,
             max_length=64,
@@ -188,12 +158,13 @@ class PRFCollator(DefaultDataCollator):
         ).to(device)
         batch_r['q_tokens'] = [initial_q['input_ids']]
         batch_r['q_masks'] = [initial_q['attention_mask']]
+        batch_r['q_types'] = [initial_q['token_type_ids']]
 
         ## Feedbacks as followup query
         for seg_num in range(n_max_segments): 
             batch_feedback_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
-            feedback_q = self.tokenizer.batch_encode_plus(
-                [fbk for fbk in batch_feedback_q],
+            feedback_q = self.tokenizer(
+                [f['query'] for f in features], [fbk for fbk in batch_feedback_q],
                 add_special_tokens=True,
                 max_length=self.max_src_length,
                 truncation=self.truncation,
@@ -202,6 +173,7 @@ class PRFCollator(DefaultDataCollator):
             ).to(device)
             batch_r['q_tokens'].append(feedback_q['input_ids'])
             batch_r['q_masks'].append(feedback_q['attention_mask'])
+            batch_r['q_types'].append(feedback_q['token_type_ids'])
 
         # Document # positive + (negative if it has)
         candidate_size = len(features[0]['contexts'])
@@ -209,7 +181,7 @@ class PRFCollator(DefaultDataCollator):
         batch_r['d_masks'] = []
 
         for i in range(candidate_size):
-            candidate = self.tokenizer.batch_encode_plus(
+            candidate = self.tokenizer(
                 [f"{features[b]['contexts'][i]['title']} {features[b]['contexts'][i]['text']}".strip() 
                     for b in range(batch_size)],
                 add_special_tokens=True,

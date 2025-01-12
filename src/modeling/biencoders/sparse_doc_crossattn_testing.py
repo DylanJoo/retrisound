@@ -35,19 +35,14 @@ class SparseAdaptiveEncoders(nn.Module):
         self.q_encoder = q_encoder
         self.encoder = (encoder or q_encoder)
         self.n_candidates = n_candidates
-        self.config = q_encoder.model.config
+        self.config = q_encoder.config
 
         for n, p in self.named_parameters():
-            if 'crossattention' in n:
+            if 'q_encoder' in n:
                 p.requires_grad = True
                 print(n)
             else:
                 p.requires_grad = False
-
-    def _flop(self, q_value):
-        lambda_t_q = 0.005
-        q_value = torch.sum(torch.mean(torch.abs(q_value), dim=0) ** 2)
-        return q_value * lambda_t_q
 
     def get_contrastive_loss(self):
         batch_size, vocab_size = output.reps.shape
@@ -88,32 +83,31 @@ class SparseAdaptiveEncoders(nn.Module):
             prev_output = output = self.encoder(q_tokens, q_masks)
             reps = q_tokens
         else:
-            f_output = self.encoder(f_tokens, f_masks)
-            output = self.q_encoder(
-                q_tokens, 
-                q_masks, 
-                encoder_hidden_states=f_output.last_hidden_states,
-                encoder_attention_mask=f_masks
-            )
+            if self.q_encoder.config.is_decoder:
+                output = self.q_encoder(
+                    input_ids=f_tokens,
+                    attention_mask=f_masks,
+                    sub_input_ids=q_tokens,
+                    sub_attention_mask=q_masks,
+                    sub_token_type_ids=kwargs.pop('sub_token_type_ids', None),
+                )
+            else:
+                output = self.q_encoder(
+                    input_ids=f_tokens,
+                    attention_mask=f_masks,
+                    token_type_ids=kwargs.pop('sub_token_type_ids', None),
+                )
 
-            # option1: query+feedback as candidate
-            # candidate_tokens = torch.cat([q_tokens, f_tokens], 1)
-            # candidate_masks = torch.cat([q_masks, f_masks], 1)
-
-            # option2: feedback as candidate
             candidate_tokens = f_tokens
             candidate_masks = f_masks
 
-            # selection = output.logits.softmax(-1)[:, :, 1]
-            # print('selection', selection[0])
             action, logprob = sample_actions(output.logits, samples=2)
             print('action', action[0][0, :, 1])
             logprob = logprob[0]
             select_tokens = torch.where(
-                action[0][:, :, 1]==1, candidate_tokens, torch.full_like(candidate_tokens, 0)
+                action[0][:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
             )
 
-            # reps = torch.cat([q_tokens, select_tokens], 1)
             reps = select_tokens
 
             batch_size, seq_size, _ = output.logits.shape
@@ -133,12 +127,6 @@ class SparseAdaptiveEncoders(nn.Module):
                 ## L1: token classification
                 loss_tc = CELoss(output.logits.view(-1, 2), labels[0].view(-1))
                 pos_ratio = (labels[0]==1).sum()  / (labels[0]!=-100).sum()
-
-                ## L2: contrastive learning
-                # labels = torch.cat(labels, 0).float() # N_cand B H
-                # scores = output.logits[:, :, 1] @ labels.view(-1, seq_size).permute(1, 0)
-                # labels_ct = torch.arange(0, batch_size, device=output.logits.device, dtype=torch.long)
-                # loss_ct = CELoss(scores, labels_ct)
 
         return SparseAdaptiveEncoderOutput(
             reps=reps,

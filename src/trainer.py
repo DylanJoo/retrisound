@@ -53,6 +53,14 @@ def transform_ids_to_vector(inputs, tokenizer, count=False):
         vector[:, idx] = 0
     return vector
 
+def postprocess_output(output, tag='p'):
+    output = output.split(f'</{tag}>')[0]
+    output = output.split('Query:')[0]
+    output = output.split('\n')[0]
+    output = re.sub(r"\d+\.\s", "", output).strip()
+    output = re.sub(r"-\s", "", output).strip()
+    return output
+
 class Trainer(Trainer_hf):
 
     def __init__(self, generator, index_dir=None, dense=False, lexical=False, **kwargs):
@@ -74,7 +82,7 @@ class Trainer(Trainer_hf):
     def measure_ranking(self, pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
         run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
-        result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[R@10]
+        result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[nDCG@10]
         return result
 
     def compute_loss_reward(
@@ -135,6 +143,7 @@ class Trainer(Trainer_hf):
         for i in range(0, len(prompt), gen_batch):
             b_feedback = self.generator.generate(prompt[i:i+gen_batch])
             b_feedback = [remove_citations(f) for f in b_feedback]
+            b_feedback = [postprocess_output(f, 'p') for f in b_feedback]
             feedback += b_feedback
 
         return feedback
@@ -169,8 +178,8 @@ class Trainer(Trainer_hf):
             if t == 0:
                 retriever_inputs = inputs["inputs_for_retriever"]
                 output = model(
-                    q_tokens=retriever_inputs['q_tokens'][0], 
-                    q_masks=retriever_inputs['q_masks'][0], 
+                    q_tokens=retriever_inputs['q_tokens'][0].clone(),
+                    q_masks=retriever_inputs['q_masks'][0].clone(),
                     step=0
                 )
                 output.reps = transform_ids_to_vector(
@@ -189,13 +198,14 @@ class Trainer(Trainer_hf):
                     device=model.device
                 )
                 output = model(
-                    q_tokens=retriever_inputs['q_tokens'][0], 
-                    q_masks=retriever_inputs['q_masks'][0], 
-                    f_tokens=retriever_inputs['q_tokens'][t], 
-                    f_masks=retriever_inputs['q_masks'][t], 
+                    q_tokens=retriever_inputs['q_tokens'][0].clone(), 
+                    q_masks=retriever_inputs['q_masks'][0].clone(),
+                    f_tokens=retriever_inputs['q_tokens'][t].clone(),
+                    f_masks=retriever_inputs['q_masks'][t].clone(),
                     d_tokens=retriever_inputs['d_tokens'],
                     d_masks=retriever_inputs['d_masks'],
                     prev_output=q_out,
+                    sub_token_type_ids=retriever_inputs['q_types'][t].clone(),
                     step=t,
                 )
                 output.reps = transform_ids_to_vector(
@@ -208,7 +218,7 @@ class Trainer(Trainer_hf):
 
                 ct_losses += output.loss_ct 
                 reg_losses += output.loss_flop 
-                tc_losses += output.loss_tc
+                tc_losses = tc_losses + output.loss_tc
 
                 rewards.append(reward)
                 logs.append(output.logs['PosRatio'])
@@ -230,9 +240,9 @@ class Trainer(Trainer_hf):
         token_classification_loss = tc_losses
         regularization_loss = reg_losses
         reinforce_loss = (rewards * (-logprobs)).mean()
-        # loss = (contrastive_loss * self.args.ct_coef) + (regularization_loss * self.args.reg_coef)
 
-        loss = token_classification_loss  + (reinforce_loss * self.args.rl_coef)
+        # loss = (contrastive_loss * self.args.ct_coef) + (regularization_loss * self.args.reg_coef)
+        loss = token_classification_loss + (reinforce_loss * self.args.rl_coef)
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})

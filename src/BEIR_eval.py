@@ -68,13 +68,11 @@ def postprocess_output(output, tag='p'):
 # query rewriting
 EXAMPLE = ""
 prompt = {
-"qe": "Write a list of keywords for the given text.\nText: {}\nKeywords:\n ",
-"qr": "Refine and rewrite the text into a query for search engine to find relevant information.\nText: {}\nRewritten query:\n ",
-"rg": "Write a passage that answers the given query. Write the passage within the `<p>` and `</p>` tags.\n\nQuery: {}\nPassage:<p>",
-"prf-rg": "Write a report that answers the given query. Only use the provided search results (some of them might be irrelevant, please ignore). Draft a report within 200 words.\n\n" + EXAMPLE + "Query: {}\nSearch results:\n{}\nReport:\n ",
+"qe": "Write a list of keywords for the given query. Add the `<p>` and `</p>` tags at the beginning and the end of the list.\nQuery: {}\nKeywords: <p>",
+"qr": "Rewrite the query for search engine to find more relevant information. Add the `<p>` and `</p>` tags at the beginning and the end.\nQuery: {}\nRewritten query: <p>",
+"rg": "Write a passage that answers the given query. Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end.\n\nQuery: {}\nPassage: <p>",
 }
 
-# prompt_report_gen = "Write a report to answer the given query. Use the provided search results (ignore the irrelevant result) to draft the answer within 200 words."
 @torch.no_grad()
 def evaluate(args):
     """ only made for evaluting query encoder, and the documents have already been indexed.  
@@ -86,11 +84,14 @@ def evaluate(args):
     ## [TODO] shuffle or small subset 
 
     ## load model 
-    ada_encoder, tokenizer = prepare_encoder(args)
+    ada_encoder, tokenizer = prepare_encoder(args) 
+    if 'doc' in args.d_encoder_name: 
+        del ada_encoder
+
     q_ids = list(queries.keys())[:args.debug]
 
     ## load generators
-    generator = vLLM(args.generator_name, num_gpus=1) if args.iteration > 0 else None
+    generator = vLLM(args.generator_name, num_gpus=1, gpu_memory_utilization=0.9) if args.iteration > 0 else None
 
     # inference runs by searching
     runs = {}
@@ -154,24 +155,28 @@ def evaluate(args):
             ).to(args.device)
 
             if args.adaptive:
-                q_outputs = ada_encoder(
+                q_reps = ada_encoder(
                     None, None, 
                     f_inputs['input_ids'], f_inputs['attention_mask'],
                     prev_output=q_outputs.prev_out
-                )
+                ).reps
+
+            elif 'doc' in args.d_encoder_name:
+                q_reps = transform_ids_to_vector(f_inputs.input_ids, tokenizer, count=True)
+
             else:
                 if args.context_masking:
                     padding = f_inputs['attention_mask'].size(1) - q_inputs['attention_mask'].size(1)
                     context_mask = F.pad(q_inputs['attention_mask'], (0, padding))
                 else:
                     context_mask = None
-                q_outputs = ada_encoder(
+
+                q_reps = ada_encoder(
                     f_inputs['input_ids'], 
                     f_inputs['attention_mask'],
                     context_mask=context_mask
-                )
-            q_reps = q_outputs.reps
-
+                ).reps
+            
             ### Re-retrieve
             hits = searcher.batch_search(
                 logits=q_reps.float().detach().cpu().numpy(), 
