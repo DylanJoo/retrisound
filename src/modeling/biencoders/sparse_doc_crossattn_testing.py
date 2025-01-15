@@ -112,7 +112,7 @@ class SparseAdaptiveEncoders(nn.Module):
 
             # add sampling here
             action, logprob = sample_actions(output.logits, samples=2)
-            print('action', action[0][0, :, 1])
+            # print('action', action[0][0, :, 1])
             logprob = logprob[0]
             select_tokens = torch.where(
                 action[0][:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)

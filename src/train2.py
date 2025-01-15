@@ -44,7 +44,7 @@ def main():
     encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False).eval()
     cattn_encoder = SparseEncoder_test.from_pretrained(
         model_opt.retriever_name_or_path,
-        add_cross_attention=False, is_decoder=False, num_hidden_layers=12
+        add_cross_attention=False, is_decoder=False, num_hidden_layers=6
     )
     ada_retriever = SparseAdaptiveEncoders(
         q_encoder=cattn_encoder, 

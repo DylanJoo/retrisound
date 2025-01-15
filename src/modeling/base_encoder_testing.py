@@ -61,14 +61,6 @@ class SparseEncoder(BertForMaskedLM):
         tok_logits = self.crossattention_cls(last_hidden_states)
         nonzero_indices = None
 
-        # logits = self.cls(last_hidden_states)
-        # logits = logits * (context_mask or attention_mask).unsqueeze(-1)
-        # pooling/aggregation
-        # values, _ = torch.max(
-        #     torch.log(1 + torch.relu(logits)) 
-        #     * attention_mask.unsqueeze(-1), dim=1
-        # )
-
         return SparseEncoderOutput(
             logits=tok_logits, 
             indices=nonzero_indices,
