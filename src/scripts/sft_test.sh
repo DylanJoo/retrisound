@@ -35,7 +35,7 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --config_file configs/default_config.yaml \
-    --main_process_port 29505 \
+    --main_process_port 29506 \
     train2.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
@@ -53,12 +53,12 @@ accelerate launch \
     --generation_batch 4 \
     --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
     --num_steps 3 --n_max_segments 15 \
-    --ct_coef 1.0 \
+    --ct_coef 0.0 \
     --tc_coef 1.0 \
     --reg_coef 0.0 \
     --mr_coef 0.0 \
-    --rl_coef 1.0 \
+    --rl_coef 0.0 \
     --do_train \
     --fp16 \
     --lucene_index_dir /home/dju/indexes/${dataset}.lucene_doc \
-    --logging_steps 1 --run_name 'MLP(q, f)-q_enc+CT'
+    --logging_steps 1 --run_name 'MLP(q, f)-(CT)-q_enc'
