@@ -125,9 +125,7 @@ class SparseAdaptiveEncoders(nn.Module):
                 for i in range(n_candidates):
                     d_rep = self.encoder(d_tokens[i], d_masks[i]).indices
 
-                    label = make_labels(
-                        d_rep, candidate_tokens, candidate_masks, q_tokens
-                    )
+                    label = make_labels(d_rep, candidate_tokens, candidate_masks)
                     labels.append(label)
 
                 ## L1: token classification

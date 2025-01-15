@@ -87,6 +87,7 @@ class SparseEncoder(nn.Module):
                     encoder_attention_mask=attention_mask, 
                 )[0]
 
+            values = None
             tok_logits = self.crossattention_cls(last_hidden_states)
             nonzero_indices = None
 
@@ -103,6 +104,7 @@ class SparseEncoder(nn.Module):
             nonzero_indices = [row.nonzero(as_tuple=False).squeeze(1) for row in values]
 
         return SparseEncoderOutput(
+            reps=values,
             logits=tok_logits,
             indices=nonzero_indices,
             last_hidden_states=last_hidden_states, 

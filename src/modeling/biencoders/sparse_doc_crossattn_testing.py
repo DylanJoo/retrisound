@@ -6,6 +6,8 @@ from transformers import AutoConfig
 from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
 from modeling.utils import sample_actions
 
+# punc_ids = tokenizer(string.punctuation)
+
 def make_labels(d_tokens, candidate_tokens, candidate_masks, q_tokens=None):
     binary_matrix = torch.zeros_like(candidate_tokens)
     for i in range(len(d_tokens)):
@@ -13,15 +15,20 @@ def make_labels(d_tokens, candidate_tokens, candidate_masks, q_tokens=None):
         if q_tokens is not None:
             binary_matrix[i] = (candidate_tokens[i].unsqueeze(1) == q_tokens[i]).any(dim=1)
 
+    # mask the unused token
+    mask_matrix = torch.full_like(binary_matrix, -100)
+    binary_matrix = torch.where(candidate_masks==0, mask_matrix, binary_matrix)
+    return binary_matrix.to(candidate_tokens.device)
+
     # random sample negatives
     # rand_matrix = torch.randint(0, 2, binary_matrix.shape).to(candidate_tokens.device)
     # rand_matrix = rand_matrix * (binary_matrix == 0) 
     # binary_matrix = torch.where(rand_matrix==1, 0, -100)
 
-    # mask the unused token
-    mask_matrix = torch.full_like(binary_matrix, -100)
-    binary_matrix = torch.where(candidate_masks==0, mask_matrix, binary_matrix)
-    return binary_matrix.to(candidate_tokens.device)
+def transform_weights_to_vector(inputs, weights, vocab_size):
+    vector = torch.zeros(inputs.size(0), vocab_size, dtype=weights.dtype).to(inputs.device)
+    vector = vector.scatter(1, inputs, weights)
+    return vector
 
 class SparseAdaptiveEncoders(nn.Module):
     def __init__(
@@ -38,6 +45,7 @@ class SparseAdaptiveEncoders(nn.Module):
         self.config = q_encoder.config
 
         for n, p in self.named_parameters():
+            # if 'crossattention' in n:
             if 'q_encoder' in n:
                 p.requires_grad = True
                 print(n)
@@ -76,7 +84,8 @@ class SparseAdaptiveEncoders(nn.Module):
     ):
         q_reps, d_reps = None, []
         loss_tc, loss_flop, loss_ct, loss_mr = None, None, None, None
-        pos_ratio = 0
+        pos_ratio = 0 
+        pos_ratio_pred = 0
         logprob = None
 
         if (step == 0) and (prev_output is None):
@@ -101,6 +110,7 @@ class SparseAdaptiveEncoders(nn.Module):
             candidate_tokens = f_tokens
             candidate_masks = f_masks
 
+            # add sampling here
             action, logprob = sample_actions(output.logits, samples=2)
             print('action', action[0][0, :, 1])
             logprob = logprob[0]
@@ -108,35 +118,50 @@ class SparseAdaptiveEncoders(nn.Module):
                 action[0][:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
             )
 
+            # expand tokens
             reps = select_tokens
+
+            # default query + exapnded tokens
+            # reps = torch.cat([select_tokens, q_tokens], -1)
 
             batch_size, seq_size, _ = output.logits.shape
             CELoss = nn.CrossEntropyLoss()
 
             if d_tokens is not None:
-                labels = []
+                labels_tc = []
+
                 n_candidates = min(self.n_candidates, len(d_tokens))
                 for i in range(n_candidates):
-                    d_rep = self.encoder(d_tokens[i], d_masks[i]).indices
-
-                    label = make_labels(
-                        d_rep, candidate_tokens, candidate_masks, q_tokens
-                    )
-                    labels.append(label)
+                    d_output = self.encoder(d_tokens[i], d_masks[i])
+                    d_indices = d_output.indices
+                    d_reps.append(d_output.reps)
+                    label = make_labels(d_indices, candidate_tokens, candidate_masks)
+                    labels_tc.append(label)
 
                 ## L1: token classification
-                loss_tc = CELoss(output.logits.view(-1, 2), labels[0].view(-1))
-                pos_ratio = (labels[0]==1).sum()  / (labels[0]!=-100).sum()
+                loss_tc = CELoss(output.logits.view(-1, 2), labels_tc[0].view(-1))
+                pos_ratio = (labels_tc[0]>=1).sum()  / (labels_tc[0]!=-100).sum()
+                pos_ratio_pred = (select_tokens>=1).sum()  / (labels_tc[0]!=-100).sum()
+
+                ## L1: token classification
+                d_reps = torch.stack(d_reps, dim=0)
+                q_rep = transform_weights_to_vector(
+                    select_tokens, output.logits[:, :, 1], self.config.vocab_size
+                )
+
+                scores_t = q_rep @ d_reps.view(-1, self.config.vocab_size).transpose(1, 0)   # B V x BN V
+                labels_ct = torch.arange(0, batch_size, device=q_rep.device, dtype=torch.long)
+                loss_ct = CELoss(scores_t, labels_ct)
 
         return SparseAdaptiveEncoderOutput(
             reps=reps,
             prev_out=output,
             d_reps=d_reps,
-            loss_ct=torch.tensor([0.0]),
+            loss_ct=loss_ct,
             loss_mr=torch.tensor([0.0]),
             loss_flop=torch.tensor([0.0]),
             loss_tc=loss_tc,
-            logs={'InfoNCE': loss_ct, 'PosRatio': pos_ratio},
+            logs={'InfoNCE': loss_ct, 'PosRatio': pos_ratio, 'PosRatioPred': pos_ratio_pred},
             logprobs=logprob,
             logits=output.logits,
         )

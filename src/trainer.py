@@ -48,6 +48,7 @@ def transform_ids_to_vector(inputs, tokenizer, count=False):
         vector = vector.scatter_add(1, inputs, torch.ones_like(inputs, dtype=vector.dtype))
     else:
         vector = vector.scatter(1, inputs, 1)
+
     # clean the added tokens
     for tok, idx in tokenizer.get_added_vocab().items():
         vector[:, idx] = 0
@@ -190,6 +191,10 @@ class Trainer(Trainer_hf):
                 )
 
                 feedback = self.compute_loss_feedback(questions, candidates)
+                # feedback = []
+                # for i, qrel in enumerate(qrels):
+                #     feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
+
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -215,13 +220,16 @@ class Trainer(Trainer_hf):
                     output.reps, questions, truth=qrels
                 )
                 feedback = self.compute_loss_feedback(questions, candidates)
+                # feedback = []
+                # for i, qrel in enumerate(qrels):
+                #     feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
 
                 ct_losses += output.loss_ct 
                 reg_losses += output.loss_flop 
-                tc_losses = tc_losses + output.loss_tc
+                tc_losses += output.loss_tc
 
                 rewards.append(reward)
-                logs.append(output.logs['PosRatio'])
+                logs.append(output.logs['PosRatioPred'])
 
                 # reinforcement
                 logprobs.append(output.logprobs) # B L 2
@@ -241,8 +249,9 @@ class Trainer(Trainer_hf):
         regularization_loss = reg_losses
         reinforce_loss = (rewards * (-logprobs)).mean()
 
-        # loss = (contrastive_loss * self.args.ct_coef) + (regularization_loss * self.args.reg_coef)
-        loss = token_classification_loss + (reinforce_loss * self.args.rl_coef)
+        loss = (token_classification_loss * self.args.tc_coef) + \
+                (reinforce_loss * self.args.rl_coef) + \
+                (contrastive_loss * self.args.ct_coef) 
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})

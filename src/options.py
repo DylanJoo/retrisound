@@ -53,10 +53,10 @@ class ReinforceOptions(TrainingArguments):
     generation_batch: Optional[int] = field(default=2)
     report_to: Optional[str] = field(default="wandb")
     ct_coef: Optional[float] = field(default=0.0)
+    tc_coef: Optional[float] = field(default=0.0)
     mr_coef: Optional[float] = field(default=0.0)
     rl_coef: Optional[float] = field(default=1.0)
     reg_coef: Optional[float] = field(default=1.0)
-    reward_type: str = field(default='normal')
 
 @dataclass
 class LLMOptions:
