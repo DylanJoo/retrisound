@@ -35,7 +35,7 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --config_file configs/default_config.yaml \
-    --main_process_port 29500 \
+    --main_process_port 29501 \
     train2.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
@@ -51,9 +51,9 @@ accelerate launch \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 4 \
-    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 10 \
+    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
     --num_steps 3 --n_max_segments 15 \
-    --ct_coef 1.0 \
+    --ct_coef 0.0 \
     --tc_coef 1.0 \
     --reg_coef 0.0 \
     --mr_coef 0.0 \
@@ -61,4 +61,4 @@ accelerate launch \
     --do_train \
     --fp16 \
     --lucene_index_dir /home/dju/indexes/${dataset}.lucene_doc \
-    --logging_steps 1 --run_name 'MLP(q, f)-(TC+CT)-q_enc:6-RN:10'
+    --logging_steps 1 --run_name 'MLP(q, f)-(TC)-q_enc:1'

@@ -1,34 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from transformers import AutoConfig
 from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
-from modeling.utils import sample_actions
-
-# punc_ids = tokenizer(string.punctuation)
-
-def make_labels(d_tokens, candidate_tokens, candidate_masks, q_tokens=None):
-    binary_matrix = torch.zeros_like(candidate_tokens)
-    for i in range(len(d_tokens)):
-        binary_matrix[i] = (candidate_tokens[i].unsqueeze(1) == d_tokens[i]).any(dim=1)
-        if q_tokens is not None:
-            binary_matrix[i] = (candidate_tokens[i].unsqueeze(1) == q_tokens[i]).any(dim=1)
-
-    # mask the unused token
-    mask_matrix = torch.full_like(binary_matrix, -100)
-    binary_matrix = torch.where(candidate_masks==0, mask_matrix, binary_matrix)
-    return binary_matrix.to(candidate_tokens.device)
-
-    # random sample negatives
-    # rand_matrix = torch.randint(0, 2, binary_matrix.shape).to(candidate_tokens.device)
-    # rand_matrix = rand_matrix * (binary_matrix == 0) 
-    # binary_matrix = torch.where(rand_matrix==1, 0, -100)
-
-def transform_weights_to_vector(inputs, weights, vocab_size):
-    vector = torch.zeros(inputs.size(0), vocab_size, dtype=weights.dtype).to(inputs.device)
-    vector = vector.scatter(1, inputs, weights)
-    return vector
+from modeling.biencoders.utils import make_labels, transform_weights_to_vector, sample_actions
 
 class SparseAdaptiveEncoders(nn.Module):
     def __init__(
@@ -45,7 +19,6 @@ class SparseAdaptiveEncoders(nn.Module):
         self.config = q_encoder.config
 
         for n, p in self.named_parameters():
-            # if 'crossattention' in n:
             if 'q_encoder' in n:
                 p.requires_grad = True
                 print(n)
@@ -99,10 +72,6 @@ class SparseAdaptiveEncoders(nn.Module):
 
             # expand tokens
             reps = select_tokens
-
-            # default query + exapnded tokens
-            # reps = torch.cat([select_tokens, q_tokens], -1)
-
             batch_size, seq_size, _ = output.logits.shape
             CELoss = nn.CrossEntropyLoss()
 
@@ -146,4 +115,4 @@ class SparseAdaptiveEncoders(nn.Module):
         )
 
     def gradient_checkpointing_enable(self, **kwargs):
-        self.q_encoder.model.gradient_checkpointing_enable(**kwargs)
+        self.q_encoder.gradient_checkpointing_enable(**kwargs)

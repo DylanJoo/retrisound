@@ -24,10 +24,6 @@ from transformers import (
 )
 from transformers.utils import logging 
 
-from utils import update_tokenizer, init_generation_config
-
-torch.autograd.set_detect_anomaly(True)
-
 logger = logging.get_logger("transformers")
 
 def main():
@@ -44,7 +40,7 @@ def main():
     encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False).eval()
     cattn_encoder = SparseEncoder_test.from_pretrained(
         model_opt.retriever_name_or_path,
-        add_cross_attention=False, is_decoder=False, num_hidden_layers=6
+        add_cross_attention=False, is_decoder=False, num_hidden_layers=1
     )
     ada_retriever = SparseAdaptiveEncoders(
         q_encoder=cattn_encoder, 

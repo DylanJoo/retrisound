@@ -24,8 +24,6 @@ from transformers import (
 )
 from transformers.utils import logging 
 
-from utils import update_tokenizer, init_generation_config
-
 logger = logging.get_logger("transformers")
 
 def main():

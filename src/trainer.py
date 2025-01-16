@@ -179,8 +179,8 @@ class Trainer(Trainer_hf):
             if t == 0:
                 retriever_inputs = inputs["inputs_for_retriever"]
                 output = model(
-                    q_tokens=retriever_inputs['q_tokens'][0].clone(),
-                    q_masks=retriever_inputs['q_masks'][0].clone(),
+                    q_tokens=retriever_inputs['q_tokens'][0],
+                    q_masks=retriever_inputs['q_masks'][0],
                     step=0
                 )
                 output.reps = transform_ids_to_vector(
@@ -203,14 +203,14 @@ class Trainer(Trainer_hf):
                     device=model.device
                 )
                 output = model(
-                    q_tokens=retriever_inputs['q_tokens'][0].clone(), 
-                    q_masks=retriever_inputs['q_masks'][0].clone(),
-                    f_tokens=retriever_inputs['q_tokens'][t].clone(),
-                    f_masks=retriever_inputs['q_masks'][t].clone(),
+                    q_tokens=retriever_inputs['q_tokens'][0],
+                    q_masks=retriever_inputs['q_masks'][0],
+                    f_tokens=retriever_inputs['q_tokens'][t],
+                    f_masks=retriever_inputs['q_masks'][t],
                     d_tokens=retriever_inputs['d_tokens'],
                     d_masks=retriever_inputs['d_masks'],
                     prev_output=q_out,
-                    sub_token_type_ids=retriever_inputs['q_types'][t].clone(),
+                    sub_token_type_ids=retriever_inputs['q_types'][t],
                     step=t,
                 )
                 output.reps = transform_ids_to_vector(
