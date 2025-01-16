@@ -3,7 +3,7 @@ import torch.nn as nn
 from transformers import BertForTokenClassification
 from modeling.outputs import SparseEncoderOutput
 
-class SparseEncoder(BertForTokenClassification):
+class SparseEncoderForTokenClf(BertForTokenClassification):
     def __init__(self, config):
         config.num_labels = 2
         super().__init__(config)
@@ -25,7 +25,10 @@ class SparseEncoder(BertForTokenClassification):
         output_attentions=None,
         output_hidden_states=None,
     ):
-        """ position_ids should be newly clone when you are going to freeze them. """
+        """ [Adjustment]
+        - position_ids: should be newly clone when you are going to freeze them. 
+        - sub_input_ids/attention_mask/token_type_ids: these are optional inputs only for "cross-attention" m
+        """
 
         if sub_input_ids is not None:
             position_ids = self.bert.embeddings.position_ids[:, 0 : sub_input_ids.size(1) + 0].clone()
