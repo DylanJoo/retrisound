@@ -1,130 +1,31 @@
-#!/usr/bin/env python
-# coding=utf-8
-
-import argparse
-import logging
-import math
-import os
-import sys
-import random
-import datasets
 import torch
-from datasets import load_dataset
-from tqdm.auto import tqdm
-import json
-from dataclasses import asdict
-from copy import deepcopy
+import torch.nn as nn
 
-from transformers import (
-    HfArgumentParser,
-    AutoConfig,
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    SchedulerType,
-    get_scheduler,
-    set_seed
+# Example input
+token_indices = torch.tensor([1000, 2000])  # Token indices from tokenizer
+input_embeddings = torch.randn(len(token_indices), 768, requires_grad=True)  # Token embeddings
+
+# Define MLP for token weight prediction
+mlp = nn.Sequential(
+    nn.Linear(768, 128),
+    nn.ReLU(),
+    nn.Linear(128, 1)  # Predict scalar weight
 )
-from transformers.utils import logging 
 
-from utils import update_tokenizer
+# Predict token weights
+token_weights = mlp(input_embeddings).squeeze()  # Shape: [n_tokens]
 
-logger = logging.get_logger("transformers")
+# Create vocabulary vector (30522-dimensional)
+vocab_size = 30522
+vocab_vector = torch.zeros(vocab_size)
+vocab_vector.index_add_(0, token_indices, token_weights)
 
-def main():
+# Example similarity computation
+document_vector = torch.randn(30522, requires_grad=True)  # Document representation
+similarity = torch.dot(vocab_vector, document_vector)
 
-    from options import ModelOptions, DataOptions, RLTrainOptions
-    parser = HfArgumentParser((ModelOptions, DataOptions, RLTrainOptions))
-    model_opt, data_opt, train_opt = parser.parse_args_into_dataclasses()
-    if data_opt.config_file is not None:
-        model_opt, data_opt, train_opt = parser.parse_yaml_file(data_opt.config_file)
-    set_seed(train_opt.seed)
+print(similarity)
 
-    # [Bi-encoder]
-    tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-    from modeling.rmt import RMTEncoder
-    from modeling.rife import Contriever
-    from modeling.biencoders import AdaptiveReranker
-    ada_encoder = RMTEncoder(
-        base_model=Contriever.from_pretrained(model_opt.retriever_name_or_path,),
-        tokenizer=tokenizer_r,
-        num_mem_tokens=model_opt.num_mem_tokens,
-        n_max_segments=train_opt.n_max_segments,
-        input_size=128,
-        sum_loss=False,
-    )
-    ada_reranker = AdaptiveReranker(
-        model_opt,
-        q_encoder=ada_encoder,
-        d_encoder=Contriever.from_pretrained(model_opt.retriever_name_or_path),
-    )
-    # [Generatir Config & tokenizer & Model]
-    ## [TODO] Check further the accurate setup of tokenizer for llama
-    from utils import update_tokenizer
-    tokenizer_g = AutoTokenizer.from_pretrained(
-            model_opt.generator_name_or_path, 
-            padding_side='left',
-            use_fast=True
-    )
-    tokenizer_g = update_tokenizer(tokenizer_g, "[PAD]")
+# Backward pass
+similarity.backward()
 
-    stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
-    stop_token_ids = [tokenizer_g.eos_token_id] + [tokenizer_g.convert_tokens_to_ids(token) for token in stop]
-    stop_token_ids = list(set([token_id for token_id in stop_token_ids if token_id is not None]))  
-
-    # [RAG]
-    config = AutoConfig.from_pretrained(model_opt.generator_name_or_path)
-    from modeling.rag_wrapper2 import RerankAugmentedGenerationWrapper
-    model = RerankAugmentedGenerationWrapper.from_pretrained(
-        model_opt.generator_name_or_path,
-        config=config,
-        low_cpu_mem_usage=train_opt.low_cpu_mem_usage,
-        attn_implementation=model_opt.attn_implementation,
-        stop_token_ids=stop_token_ids,
-        num_budget=model_opt.num_budget,
-        torch_dtype=torch.bfloat16,
-        is_reference=False
-    )
-    model.set_biencoders(bi_encoders)
-    model.set_tokenizer(tokenizer_g)
-
-    # [Model for RL]
-    from modeling.rewards import MetricRewards
-    reward_model = MetricRewards('rouge')
-
-    # [Data]
-    ## [NOTE] execute multithread once and wait
-    from data.qampari import ContextQADataset, ContextQACollator
-    train_dataset = ContextQADataset(
-        data_file=data_opt.train_file, 
-        n_max_segments=train_opt.n_max_segments,
-        n_max_candidates=train_opt.n_max_candidates,
-        budget=model_opt.num_budget,
-        depth=data_opt.depth,
-        corpus_file=data_opt.corpus_file,
-        retrieval_file=data_opt.retrieval_file,
-        quick_test=train_opt.quick_test
-    )
-
-    # [Data] data ollator
-    data_collator = ContextQACollator(
-        tokenizer_r=tokenizer_r,
-        tokenizer_g=tokenizer_g,
-    )
-
-    # [trainer]
-    from rlrag_trainer import RAGRLTrainer
-    ppo_trainer = RAGRLTrainer(
-	config=train_opt,
-	tokenizer=tokenizer_g,
-	policy=model,
-	ref_policy=ref_model,
-	reward_model=reward_model,
-	value_model=reward_model,
-	train_dataset=train_dataset,
-	data_collator=data_collator,
-    )
-    ppo_trainer.train()
-
-
-if __name__ == '__main__':
-    main()

@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import evaluate
-from prompts.qampari import *
 from torch.nn import CrossEntropyLoss
 
 """
@@ -31,50 +30,50 @@ class Metric:
         results = torch.tensor(results['rouge1'])
         return results
 
-class GenerativeRewardWrapper(nn.Module):
+class Judgement:
+    def __init__(self, scales=None, counting=False):
+        if scales:
+            self.scale = scales
+        else:
+            self.scale = list(range(0, 6)) # 0, 1, ...., 5
+        self.counting = counting
 
+    def compute(self, judgements):
+
+        results = [0] * len(judgements)
+        for i, judgement in enumerate(judgements):
+
+            if self.counting:
+                pattern = re.compile(r"[\d\d]\]+")
+                result = re.findall(pattern, judgement)
+                result = max(self.scale[0], len(result))
+            else:
+                pattern = re.compile(r"[\d\d]+")
+                result = re.findall(pattern, judgement + "-1")[0]
+                result = max(self.scale[0], float(result))
+            results[i] = min(result, self.scale[-1])
+        results = torch.tensor(results).float()
+        return results
+
+class GenerativeRewardWrapper(nn.Module):
     def __init__(self, generator, tokenizer, utility, generation_config):
         super().__init__()
         self.generator = generator
         self.tokenizer = tokenizer
         self.utility = utility
         self.generator.generation_config = generation_config
+        self.generator.generation_config.pad_token_id = tokenizer.pad_token_id
+
         # freeze params
         for n, p in self.generator.named_parameters():
             p.requires_grad = False
 
-    # def inference(
-    #     self, 
-    #     queries=None,
-    #     query_tensors=None, 
-    #     batch_size=None
-    # ):
-    #     if batch_size is None:
-    #         return self._inference(queries, query_tensors, responses)
-    #     else:
-    #         query_tensors, response_tensors, responses = [], [], []
-    #         for i in range(0, queries.shape[0], batch_size):
-    #             b_queries = queries[i: i+batch_size]
-    #             if query_tensors is not None:
-    #                 qt, rt, r = self._inference(
-    #                     query_tensors=query_tensors[i: i+batch_size],
-    #                 )
-    #             else:
-    #                 qt, rt, r = self._inference(
-    #                     queries=queries[i: i+batch_size],
-    #                 )
-    #             query_tensors.append(qt)
-    #             response_tensors.append(rt)
-    #             responses.append(r)
-    #         query_tensors = torch.cat(query_tensors, 0)
-    #         response_tensors = torch.cat(response_tensors, 0)
-    #         responses += r
-    #         return query_tensors, response_tensors, responses
-
+    @torch.no_grad()
     def _inference(
         self, 
         queries=None,
-        query_tensors=None, 
+        query_tensors=None,
+        max_new_tokens=128
     ):
         default = self.tokenizer.padding_side
 
@@ -95,6 +94,10 @@ class GenerativeRewardWrapper(nn.Module):
         response_outputs = self.generator.generate(
             input_ids=query_tensors,
             attention_mask=query_masks,
+            do_sample=True, 
+            temperature=0.7,
+            top_p=0.95,
+            max_new_tokens=max_new_tokens,
         )
         responses = self.tokenizer.batch_decode(
             response_outputs[:, query_tensors.shape[1]:],
@@ -115,12 +118,17 @@ class GenerativeRewardWrapper(nn.Module):
         # return query_tensors, response_tensors, responses, test
         return query_tensors, response_tensors, responses
 
-    def get_rewards(self, predictions, targets):
-        results = self.utility.compute(
-            predictions=predictions,
-            references=targets,
-            use_aggregator=False
-        )
+    def get_rewards(self, predictions, targets=None):
+        if isinstance(self.utility, Metric):
+            results = self.utility.compute(
+                predictions=predictions,
+                references=targets,
+                use_aggregator=False
+            )
+
+        if isinstance(self.utility, Judgement):
+            results = self.utility.compute(judgements=predictions)
+
         return results
 
     @staticmethod
@@ -130,6 +138,8 @@ class GenerativeRewardWrapper(nn.Module):
         texts = re.sub(pattern, ' ', texts).strip()
         pattern = re.compile(r"\n")
         texts = re.sub(pattern, ' ', texts).strip()
+        ## remove q tag
+        texts = texts.split('</q>')[0]
         return texts
 
     @torch.no_grad()
@@ -254,3 +264,31 @@ class GenerativeRewardWrapper(nn.Module):
     #     torch.cuda.empty_cache()
     #     return logits, logprobs # B |r|
     #
+
+    # def inference(
+    #     self, 
+    #     queries=None,
+    #     query_tensors=None, 
+    #     batch_size=None
+    # ):
+    #     if batch_size is None:
+    #         return self._inference(queries, query_tensors, responses)
+    #     else:
+    #         query_tensors, response_tensors, responses = [], [], []
+    #         for i in range(0, queries.shape[0], batch_size):
+    #             b_queries = queries[i: i+batch_size]
+    #             if query_tensors is not None:
+    #                 qt, rt, r = self._inference(
+    #                     query_tensors=query_tensors[i: i+batch_size],
+    #                 )
+    #             else:
+    #                 qt, rt, r = self._inference(
+    #                     queries=queries[i: i+batch_size],
+    #                 )
+    #             query_tensors.append(qt)
+    #             response_tensors.append(rt)
+    #             responses.append(r)
+    #         query_tensors = torch.cat(query_tensors, 0)
+    #         response_tensors = torch.cat(response_tensors, 0)
+    #         responses += r
+    #         return query_tensors, response_tensors, responses

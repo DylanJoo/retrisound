@@ -2,3 +2,4 @@ modeling/recurrent-memory-transformer/
 *swp
 **/__pycache__/
 archived/
+*.pickle

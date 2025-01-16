@@ -1,4 +1,5 @@
 import json
+import datetime
 import torch
 import numpy as np
 from glob import glob
@@ -23,12 +24,12 @@ class ContextQADataset(Dataset):
         self, 
         data_file, 
         n_max_segments=10,
-        n_max_candidates=10,
         depth=30,
-        budget=5,
         corpus_file=None,
         retrieval_file=None,
-        quick_test=None
+        judgement_file=None,
+        quick_test=None,
+        half_with_bottom=False
     ):
         with open(data_file, 'r') as f:
             raw_data = json.load(f)['train']
@@ -46,7 +47,8 @@ class ContextQADataset(Dataset):
         self.quick_test = quick_test 
         self.length = len(data)
         self.n_max_segments = n_max_segments
-        self.n_max_candidates = n_max_candidates
+        self.depth = depth
+        self.half_with_bottom = half_with_bottom
 
         ## fixed attributes 
         self.qids = [None] * self.length
@@ -55,26 +57,25 @@ class ContextQADataset(Dataset):
         self.sub_questions = [None] * self.length
         self.sub_answers = [None] * self.length
         self.corpus = {-1: {'text': "", 'title': ""}}
+        if quick_test is not None:
+            self.corpus = defaultdict(lambda: {'text': "this is a testing doc.", 'title': "this is a testing title."})
 
         ## dynamic attributes
-        # self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
         self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
+        self.n_feedbacks = [0] * self.length
         self._build(data)
-
-        ## results for context candidates
-        if retrieval_file is not None:
-            self._load_retrieval(retrieval_file)
-        else:
-            self.candidate_pids = None
+        self.positives = defaultdict(list)
+        self.negatives = defaultdict(list)
 
         ## corpus for mapping
         if corpus_file is not None:
             self._load_corpus(corpus_file)
 
-        ## add context buffer count
-        ## None means everything
-        self.depth = depth
-        self.budget = budget
+        ## load prerun judgements
+        self.judgements = {}
+        for qid in self.qids:
+            self.judgements[qid] = defaultdict(int)
+        self._load_judgement(judgement_file)
 
     def _build(self, data):
         for idx in range(self.length):
@@ -84,19 +85,17 @@ class ContextQADataset(Dataset):
             self.sub_questions[idx] = data[idx]['sub_questions']
             self.sub_answers[idx] = data[idx]['sub_answers']
 
-    def _load_retrieval(self, file):
-        """
-        [NOTE] Here we will do additional preprocess. 
-        We only keep the discard the passage
-        """
-        self.candidate_pids = defaultdict(list)
-        with open(file, 'r') as f:
-            for line in tqdm(f):
-                qid, _, docid, rank, score, _ = line.strip().split()
-                if int(rank) <= self.n_max_candidates:
-                    self.candidate_pids[qid].append(docid)
-                    self.corpus[docid] = {'text': "", 'title': ""}
-                    # remove this if `_load_corpus` doesn't need to predefine
+    def _load_judgement(self, file):
+        file = (file or f'/home/dju/temp/judge-{datetime.datetime.now().strftime("%b%d-%I%m")}.txt')
+        self.judgement_file = file
+        try:
+            with open(file, 'r') as f:
+                for line in tqdm(f):
+                    id, psgid, judge = line.strip().split()[:3]
+                    self.judgements[id][psgid] = judge
+        except:
+            with open(file, 'w') as f:
+                f.write("id\tpid\tj\tinfo\n")
 
     def _load_corpus(self, dir):
         from multiprocessing import Pool
@@ -109,35 +108,62 @@ class ContextQADataset(Dataset):
 
             for corpus in corpora:
                 for docid, docdict in corpus.items():
-                    try:
-                        self.corpus[docid].update(docdict)
-                    except:
-                        continue
+                    self.corpus[docid] = docdict
             del corpora
 
     def __len__(self):
         return len(self.questions)
 
-    def add_feedback(self, idx, act):
+    def add_feedback(self, idx, fbk):
         try:
             i = self.feedbacks[idx].index("") # empty strings
-            self.feedbacks[idx][i] = act
+            self.feedbacks[idx][i] = fbk
+            self.n_feedbacks[idx] += 1
         except: # means it's full
-            self.feedbacks[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
+            self.feedbacks[idx] = [fbk] + ["" for _ in range(self.n_max_segments-1)] 
+            self.n_feedbacks[idx] = 1
+
+    def add_judgements(self, idx, judgements, info=None):
+        id = self.ids[idx]
+        with open(self.judgement_file, 'a') as f:
+            for pid in judgements:
+                j = judgements[pid]
+                # in memory
+                self.judgements[id][pid] = j
+                # to file
+                if j == 0:
+                    f.write(f"{id}\t{pid}\t{j}\t{info}\n")
+
+    def update_candidates(self, idx, pids, scores=None):
+        qid = self.qids[idx]
+        for i, pid in enumerate(pids):
+            if scores[i] < 3:
+                self.negatives[qid].append(pid)
+            elif scores[i] > 5:
+                self.positives[qid].append(pid)
 
     def __getitem__(self, idx):
         qid = self.qids[idx]
-        cand_pids = self.candidate_pids[qid][:self.n_max_candidates] # can be qid or idx
 
-        if len(cand_pids) < self.n_max_candidates:
-            cand_pids += [-1] * max(0, self.n_max_candidates - len(cand_pids))
-
-        return {'index': idx,
-                'questions': self.questions[idx], 
-                'feedbacks': self.feedbacks[idx],
-                'answers': self.answers[idx],
-                'candidate_pids': cand_pids, 
-                'candidates': [self.corpus[pid] for pid in cand_pids],} # this is for reranker 
+        n_feedbacks = self.n_feedbacks[idx]
+        if n_feedbacks >= 1:
+            positive_context = [{"text": self.feedbacks[idx][n_feedbacks - 1], "title": ""}]
+            negative_context = [self.corpus[pid] for pid in (self.negatives[qid]+[-1])[:1]]
+            return {'index': idx,
+                    'questions': self.questions[idx], 
+                    'feedbacks': self.feedbacks[idx],
+                    'n_feedbacks': self.n_feedbacks[idx],
+                    'answers': self.answers[idx],
+                    'sub_answers': self.sub_answers[idx],
+                    'candidates': positive_context + negative_context}
+        else:
+            return {'index': idx,
+                    'questions': self.questions[idx], 
+                    'feedbacks': self.feedbacks[idx],
+                    'n_feedbacks': self.n_feedbacks[idx],
+                    'answers': self.answers[idx],
+                    'sub_answers': self.sub_answers[idx],
+                    'candidates': [{"text": "", "title": ""}, {"text": "", "title": ""}]}
 
 @dataclass
 class ContextQACollator(DefaultDataCollator):
@@ -146,9 +172,7 @@ class ContextQACollator(DefaultDataCollator):
     truncation: Union[bool, str] = True
     padding: Union[bool, str, PaddingStrategy] = 'longest'
     max_src_length: Union[int] = 256
-    max_tgt_length: Union[int] = 16
     pad_to_multiple_of: Optional[int] = None
-    num_mem_tokens: Union[int] = 16
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -172,9 +196,10 @@ class ContextQACollator(DefaultDataCollator):
         batch['index'] = [f['index'] for f in features] # we record it 
         batch['questions'] = [f['questions'] for f in features] 
         batch['targets'] = [f['answers'] for f in features] 
+        batch['answers'] = [f['sub_answers'] for f in features] 
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
-        batch['candidate_pids'] = [f['candidate_pids'] for f in features] 
+        batch['n_feedbacks'] = [f['n_feedbacks'] for f in features] 
         return batch
 
     def get_inputs_for_retriever(
@@ -196,9 +221,11 @@ class ContextQACollator(DefaultDataCollator):
             return_tensors='pt'
         ).to(device)
         batch_r['q_tokens'] = [initial_q['input_ids']]
-        batch_r['q_mask'] = [initial_q['attention_mask']]
+        batch_r['q_masks'] = [initial_q['attention_mask']]
 
         # encode the action/followup text segment-by-segment
+        # original_pad_token = self.tokenizer_r.pad_token
+        # self.tokenizer_r.pad_token = self.tokenizer_r.mask_token
         for seg_num in range(n_max_segments): 
             batch_action_q = [ features[b]['feedbacks'][seg_num] for b in range(batch_size) ]
             action_q = self.tokenizer_r.batch_encode_plus(
@@ -210,12 +237,13 @@ class ContextQACollator(DefaultDataCollator):
                 return_tensors='pt'
             ).to(device)
             batch_r['q_tokens'].append(action_q['input_ids'])
-            batch_r['q_mask'].append(action_q['attention_mask'])
+            batch_r['q_masks'].append(action_q['attention_mask'])
+        # self.tokenizer_r.pad_token = original_pad_token
 
         # encode the candidate texts
         candidate_size = len(features[0]['candidates'])
         batch_r['d_tokens'] = []
-        batch_r['d_mask'] = []
+        batch_r['d_masks'] = []
         for ctx in range(candidate_size):
             candidate = self.tokenizer_r.batch_encode_plus(
                 [f"{features[b]['candidates'][ctx]['title']} {features[b]['candidates'][ctx]['text']}" for b in range(batch_size)],
@@ -226,6 +254,6 @@ class ContextQACollator(DefaultDataCollator):
                 return_tensors='pt'
             ).to(device)
             batch_r['d_tokens'].append(candidate['input_ids'])
-            batch_r['d_mask'].append(candidate['attention_mask'])
+            batch_r['d_masks'].append(candidate['attention_mask'])
 
         return batch_r

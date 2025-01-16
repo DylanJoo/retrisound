@@ -1,7 +1,9 @@
 import torch.nn as nn
 import torch
-from prompts.qampari import *
+import numpy as np
 from transformers import GenerationConfig
+from prompts.generic import *
+from transformers import AutoTokenizer
 
 def init_generation_config(model_opt, tokenizer):
     stop = ["<|eot_id|>", "ĊĊĊ", "ĊĊ", "<0x0A>", "<|end_of_text|>"]
@@ -12,8 +14,8 @@ def init_generation_config(model_opt, tokenizer):
     ))  
     return GenerationConfig(
         do_sample=True,
-        temperature=0.5,
-        top_p=1.0,
+        temperature=0.2,
+        top_p=0.1,
         max_new_tokens=model_opt.max_new_tokens,
         num_return_sequences=1,
         eos_token_id=stop_token_ids
@@ -32,46 +34,42 @@ def update_tokenizer(tokenizer, pad_token='[PAD]'):
 
     return tokenizer
 
-def augmentation(questions, candidates, rankings, n_context):
-    """
-    questions `List[str]`
-    candidates `List[List[str]]`
-    rankings `List[List[str]]`
-    """
-    # prepare contexts
-    assert len(candidates) == rankings.size(0)
-    contexts = []
-    for i in range(len(rankings)):
-        reranked_context = [candidates[i][j] for j in rankings[i]]
-        contexts.append(reranked_context[:n_context])
+# def augmentation_response(
+#     questions, 
+#     candidates, 
+#     n_context,
+#     answers=None,
+#     independent=False
+# ):
+#     # prepare prompts
+#     prompts = []
+#     if independent:
+#         for j in range(len(candidates)):
+#             d = apply_docs_prompt([candidates[j]], field='text')
+#             prompt = apply_rsp_inst_prompt(Q=questions, D=d)
+#             prompts.append(prompt)
+#     else:
+#         contexts = [clist[:n_context] for clist in candidates] 
+#         for i in range(len(questions)):
+#             D = apply_docs_prompt(contexts[i], field='text')
+#             prompt = apply_rsp_inst_prompt(Q=questions[i], D=D)
+#             prompts.append(prompt)
+#     return prompts
 
+def augmentation_feedback(
+    questions, 
+    candidates, 
+    n_context, 
+):
     # prepare prompts
     prompts = []
-    prompts_fbk = []  
-    prompts_last = [] 
 
     for i in range(len(questions)):
-        ## for answering
-        D = apply_docs_prompt(contexts[i], field='text')
-        prompt = apply_inst_prompt(
-            Q=questions[i], 
-            D=D,
-            instruction=instruction_prompt,
-            prefix="Answer:\n"
-        ).replace('{DEMO}', '')
+        D = apply_docs_prompt(candidates[i][:n_context], field='text')
+        prompt = apply_fbk_inst_prompt(Q=questions[i], D=D)
         prompts.append(prompt)
 
-        ## for getting feedback
-        prompt_fbk = apply_fbk_inst_prompt(
-            Q=questions[i], 
-            D=D,
-            instruction=fbk_instruction_prompt,
-            prefix=fbk_prefix
-        )
-        prompts_fbk.append(prompt_fbk)
-
-
-    return prompts, prompts_fbk
+    return prompts
 
 def get_mini_batch_dict(retriever_inputs, mb_inds):
     mb_retriever_inputs = {}
@@ -93,7 +91,10 @@ def multiple_sample_and_log_probability(
     scores, 
     sample_size, 
     return_prob=True, 
-    batch=False
+    batch=False,
+    sort=False,
+    baseline=False,
+    tau=1
 ):
     if not batch:
         assert scores.dim() == 1
@@ -103,8 +104,13 @@ def multiple_sample_and_log_probability(
             log_probs = torch.zeros_like(subtracts, dtype=torch.float)
         rankings = []
         for j in range(scores.size(0)):
-            probs = nn.functional.softmax(scores - subtracts, dim=1) + 1e-10
-            posj = torch.multinomial(probs, 1).squeeze(-1)
+            probs = nn.functional.softmax( (scores - subtracts)/tau, dim=1) + 1e-10
+            if sort:
+                posj = torch.argmax(probs, 1).squeeze(-1)
+            elif baseline:
+                posj = j
+            else:
+                posj = torch.multinomial(probs, 1).squeeze(-1)
             rankings.append(posj)
             if return_prob:
                 log_probs[:, j] = probs[batch_index, posj].log()
@@ -115,6 +121,7 @@ def multiple_sample_and_log_probability(
             return rankings, log_probs
         else:
             return rankings
+
     else:
         assert scores.dim() == 2
         batch_size, candidiate_size = scores.size(0), scores.size(1)
@@ -130,14 +137,21 @@ def multiple_sample_and_log_probability(
         rankings = []
         for j in range(scores.size(1)):
             probs = nn.functional.softmax(
-                scores.unsqueeze(1) - subtracts, dim=-1) + 1e-10
-            posj = torch.multinomial(
-                probs.reshape(
-                    batch_size * sample_size,
-                    -1
-                ),
-                1
-            ).squeeze(-1).reshape(batch_size, sample_size)
+                (scores.unsqueeze(1) - subtracts)/tau, dim=-1) + 1e-10
+            if sort:
+                posj = torch.argmax(
+                    probs.reshape(batch_size * sample_size, -1),
+                    1
+                ).squeeze(-1).reshape(batch_size, sample_size)
+            elif baseline:
+                posj = torch.tensor(
+                    [j] * (batch_size * sample_size)
+                ).reshape(batch_size, sample_size)
+            else:
+                posj = torch.multinomial(
+                    probs.reshape(batch_size * sample_size, -1),
+                    1
+                ).squeeze(-1).reshape(batch_size, sample_size)
             rankings.append(posj)
             if return_prob:
                 log_probs[:, :, j] = probs[batch_index,
@@ -150,6 +164,20 @@ def multiple_sample_and_log_probability(
             return rankings, log_probs
         else:
             return rankings
+
+def load_searcher(path, dense=False, lexical=False, sparse=False):
+    searcher = None
+    if dense:
+        from pyserini.search.faiss import FaissSearcher
+        searcher = FaissSearcher(path, 'facebook/contriever-msmarco')
+    if lexical:
+        from _impact_searcher import LuceneImpactSearcher
+        searcher = LuceneImpactSearcher(path, 'naver/splade-v3')
+    if sparse:
+        from pyserini.search.lucene import LuceneSearcher
+        searcher = LuceneSearcher(path)
+        searcher.set_bm25(k1=0.9, b=0.4)
+    return searcher
 
 def get_expected_inputs(
     queries, 

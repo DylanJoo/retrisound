@@ -25,20 +25,11 @@ class ContextQADataset(Dataset):
         n_max_segments=10,
         n_max_candidates=10,
         depth=30,
-        budget=5,
         corpus_file=None,
         retrieval_file=None,
-        quick_test=None
+        quick_test=None,
+        half_with_bottom=False
     ):
-        """
-        params
-        ------
-        n_max_segment: the max number of segments (exclude the initial q)
-        n_max_candidates: the max depth of considered intialized retrieval
-        depth: the pool size of psg for re-ranking as candidates may change
-        budget: the context size of psg for later generator to read
-
-        """
         data = []
         with open(data_file, 'r') as f:
             for line in f:
@@ -48,6 +39,8 @@ class ContextQADataset(Dataset):
         self.length = len(data)
         self.n_max_segments = n_max_segments
         self.n_max_candidates = n_max_candidates
+        self.depth = depth
+        self.half_with_bottom = half_with_bottom
 
         ## fixed attributes 
         self.qids = [None] * self.length
@@ -56,6 +49,7 @@ class ContextQADataset(Dataset):
         self.proof = [[] for _ in range(self.length)] 
         self.gold_context = [[] for _ in range(self.length)]
         self.corpus = {-1: {'text': "", 'title': ""}}
+        self.n_feedbacks = [0] * self.length
 
         ## dynamic attributes
         # self.context_pids = [[-1] for _ in range(self.length)] # will be empty in the begining
@@ -66,29 +60,23 @@ class ContextQADataset(Dataset):
         if retrieval_file is not None:
             self._load_retrieval(retrieval_file)
         else:
-            self.candidate_pids = None
+            self.candidate_pids = defaultdict(list)
 
         ## corpus for mapping
         if corpus_file is not None:
             self._load_corpus(corpus_file)
 
-        ## add context buffer count
-        ## None means everything
-        self.depth = depth
-        self.budget = budget
 
     def _build(self, data):
         for idx in range(self.length):
             self.qids[idx] = data[idx]['qid']
             self.questions[idx] = data[idx]['question_text']
-
             for answer in data[idx]['answer_list']:
                 self.answer_list[idx].append(answer['answer_text'])
 
                 for proof in answer['proof']:
                     self.proof[idx].append(proof['proof_text'])
                     self.gold_context[idx].append(proof['pid']) 
-                    # this is not actually the chunk_id for corpus
 
     def _load_retrieval(self, file):
         """
@@ -99,14 +87,23 @@ class ContextQADataset(Dataset):
         with open(file, 'r') as f:
             for line in tqdm(f):
                 qid, _, docid, rank, score, _ = line.strip().split()
-                if int(rank) <= self.n_max_candidates:
+                if int(rank) <= self.depth:
                     self.candidate_pids[qid].append(docid)
                     self.corpus[docid] = {'text': "", 'title': ""}
                     # remove this if `_load_corpus` doesn't need to predefine
 
+        qids = list(self.candidate_pids.keys())
+        if self.half_with_bottom:
+            for i, qid in enumerate(self.candidate_pids):
+                n_half = (self.n_max_candidates // 2)
+                first_half = self.candidate_pids[qid][:n_half]
+                # second_half = self.candidate_pids[qid][-n_half:]
+                second_half = self.candidate_pids[qids[max(0, i-1)]][-n_half:]
+                self.candidate_pids[qid] = (first_half + second_half)
+
     def _load_corpus(self, dir):
         from multiprocessing import Pool
-        files = glob(f'{dir}/*jsonl')
+        files = glob(f'{dir}/*jsonl*')
         if self.quick_test is not None:
             files = files[:10]
         for batch_files in tqdm(batch_iterator(files, 1000), 'load wiki files', total=1+len(files)//1000):
@@ -118,7 +115,7 @@ class ContextQADataset(Dataset):
                     try:
                         self.corpus[docid].update(docdict)
                     except:
-                        continue
+                        self.corpus[docid] = docdict # can set continue if considering reranking
             del corpora
 
     def __len__(self):
@@ -128,8 +125,14 @@ class ContextQADataset(Dataset):
         try:
             i = self.feedbacks[idx].index("") # empty strings
             self.feedbacks[idx][i] = act
+            self.n_feedbacks[idx] += 1
         except: # means it's full
             self.feedbacks[idx] = [act] + ["" for _ in range(self.n_max_segments-1)] 
+            self.n_feedbacks[idx] = 1
+
+    def update_candidates(self, idx, candidate_pids):
+        qid = self.qids[idx]
+        self.candidate_pids[qid] += candidate_pids
 
     def __getitem__(self, idx):
         qid = self.qids[idx]
@@ -141,6 +144,7 @@ class ContextQADataset(Dataset):
         return {'index': idx,
                 'questions': self.questions[idx], 
                 'feedbacks': self.feedbacks[idx],
+                'n_feedbacks': self.n_feedbacks[idx],
                 'answers': self.answer_list[idx],
                 'candidate_pids': cand_pids, 
                 'candidates': [self.corpus[pid] for pid in cand_pids],} # this is for reranker 
@@ -152,9 +156,7 @@ class ContextQACollator(DefaultDataCollator):
     truncation: Union[bool, str] = True
     padding: Union[bool, str, PaddingStrategy] = 'longest'
     max_src_length: Union[int] = 256
-    max_tgt_length: Union[int] = 16
     pad_to_multiple_of: Optional[int] = None
-    num_mem_tokens: Union[int] = 16
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -162,7 +164,7 @@ class ContextQACollator(DefaultDataCollator):
         ------
         features: {
             'questions': [q1, q2, q3, ..., qB], 
-            'feebacks': [ [i11, i12, ..., i1n], ..., [iB1, iB2, ..., iBn] ], 
+            'feedbacks': [ [i11, i12, ..., i1n], ..., [iB1, iB2, ..., iBn] ], 
                 --> [ [i11, i21, ..., iB1], ..., [i1n, i2n, ..., iBn] ], 
             'answers': [[a11, a12, ...] , [a21, a22, ...]], 
                 --> 'labels': [y1, y2, ..., yn]
@@ -181,6 +183,7 @@ class ContextQACollator(DefaultDataCollator):
         batch['candidates'] = [f['candidates'] for f in features] 
         batch['inputs_for_retriever'] = batch_r
         batch['candidate_pids'] = [f['candidate_pids'] for f in features] 
+        batch['n_feedbacks'] = [f['n_feedbacks'] for f in features] 
         return batch
 
     def get_inputs_for_retriever(
@@ -202,7 +205,7 @@ class ContextQACollator(DefaultDataCollator):
             return_tensors='pt'
         ).to(device)
         batch_r['q_tokens'] = [initial_q['input_ids']]
-        batch_r['q_mask'] = [initial_q['attention_mask']]
+        batch_r['q_masks'] = [initial_q['attention_mask']]
 
         # encode the action/followup text segment-by-segment
         for seg_num in range(n_max_segments): 
@@ -216,12 +219,12 @@ class ContextQACollator(DefaultDataCollator):
                 return_tensors='pt'
             ).to(device)
             batch_r['q_tokens'].append(action_q['input_ids'])
-            batch_r['q_mask'].append(action_q['attention_mask'])
+            batch_r['q_masks'].append(action_q['attention_mask'])
 
         # encode the candidate texts
         candidate_size = len(features[0]['candidates'])
         batch_r['d_tokens'] = []
-        batch_r['d_mask'] = []
+        batch_r['d_masks'] = []
         for ctx in range(candidate_size):
             candidate = self.tokenizer_r.batch_encode_plus(
                 [f"{features[b]['candidates'][ctx]['title']} {features[b]['candidates'][ctx]['text']}" for b in range(batch_size)],
@@ -232,6 +235,6 @@ class ContextQACollator(DefaultDataCollator):
                 return_tensors='pt'
             ).to(device)
             batch_r['d_tokens'].append(candidate['input_ids'])
-            batch_r['d_mask'].append(candidate['attention_mask'])
+            batch_r['d_masks'].append(candidate['attention_mask'])
 
         return batch_r
