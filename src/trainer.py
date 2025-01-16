@@ -41,6 +41,7 @@ from utils import (
     augmentation_feedback,
     load_searcher
 )
+from tools.annealing import Annealer
 
 def transform_ids_to_vector(inputs, tokenizer, count=False):
     vector = torch.zeros(inputs.size(0), tokenizer.vocab_size).to(inputs.device)
@@ -79,6 +80,8 @@ class Trainer(Trainer_hf):
             self.rep_type = 'sparse'
             if 'doc' in index_dir:
                 self.rep_type = 'sparse_doc'
+
+        self.annealer = Annealer(100, shape='logistic', cyclical=True)
 
     def measure_ranking(self, pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
@@ -249,8 +252,14 @@ class Trainer(Trainer_hf):
         regularization_loss = reg_losses
         reinforce_loss = (rewards * (-logprobs)).mean()
 
+        if 'anneal' in self.args.rl_coef:
+            rl_coef = self.annealer(1.0)
+            self.annealer.step()
+        else:
+            rl_coef = self.args.rl_coef
+
         loss = (token_classification_loss * self.args.tc_coef) + \
-                (reinforce_loss * self.args.rl_coef) + \
+                (reinforce_loss * rl_coef) + \
                 (contrastive_loss * self.args.ct_coef) 
 
         self.log({"train/reward_0": reward_0.mean().item()})
