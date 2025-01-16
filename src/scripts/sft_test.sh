@@ -57,8 +57,8 @@ accelerate launch \
     --tc_coef 1.0 \
     --reg_coef 0.0 \
     --mr_coef 0.0 \
-    --rl_coef 0.0 \
+    --rl_coef 'annealing' \
     --do_train \
     --fp16 \
     --lucene_index_dir /home/dju/indexes/${dataset}.lucene_doc \
-    --logging_steps 1 --run_name 'MLP(q, f)-(TC)-q_enc:1'
+    --logging_steps 1 --run_name 'MLP(q, f)-(TC+RL)-q_enc:1-anneal'

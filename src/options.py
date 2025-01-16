@@ -55,7 +55,7 @@ class ReinforceOptions(TrainingArguments):
     ct_coef: Optional[float] = field(default=0.0)
     tc_coef: Optional[float] = field(default=0.0)
     mr_coef: Optional[float] = field(default=0.0)
-    rl_coef: Optional[float] = field(default=1.0)
+    rl_coef: Optional[Union[float, str]] = field(default=1.0)
     reg_coef: Optional[float] = field(default=1.0)
 
 @dataclass
