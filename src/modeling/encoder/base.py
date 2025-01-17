@@ -26,7 +26,7 @@ class SparseEncoder(BertForMaskedLM):
     ):
         """ Add a context masking, to exclude the logits used for final sparse vectors."""
 
-        outputs = self.model.bert(
+        outputs = self.bert(
             input_ids=input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
@@ -40,7 +40,7 @@ class SparseEncoder(BertForMaskedLM):
         )
 
         last_hidden_states = outputs[0]
-        logits = self.model.cls(last_hidden_states)
+        logits = self.cls(last_hidden_states)
         logits = logits * (context_mask or attention_mask).unsqueeze(-1)
 
         # pooling/aggregation
@@ -49,9 +49,12 @@ class SparseEncoder(BertForMaskedLM):
             * attention_mask.unsqueeze(-1), dim=1
         )
 
+        nonzero_indices = [row.nonzero(as_tuple=False).squeeze(1) for row in values]
+
         return SparseEncoderOutput(
             reps=values, 
             logits=logits, 
+            indices=nonzero_indices,
             last_hidden_states=last_hidden_states, 
             mask=attention_mask
         )

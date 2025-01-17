@@ -165,11 +165,8 @@ def multiple_sample_and_log_probability(
         else:
             return rankings
 
-def load_searcher(path, dense=False, lexical=False, sparse=False):
+def load_searcher(path, lexical=False, sparse=False):
     searcher = None
-    if dense:
-        from pyserini.search.faiss import FaissSearcher
-        searcher = FaissSearcher(path, 'facebook/contriever-msmarco')
     if lexical:
         from _impact_searcher import LuceneImpactSearcher
         searcher = LuceneImpactSearcher(path, 'naver/splade-v3')

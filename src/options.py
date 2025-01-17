@@ -6,8 +6,7 @@ from typing import Optional, Union, Tuple, Literal
 class ModelOptions:
     retriever_name_or_path: Optional[str] = field(default="")
     generator_name_or_path: Optional[str] = field(default=None)
-    faiss_index_dir: Optional[str] = field(default="")
-    lucene_index_dir: Optional[str] = field(default="")
+    index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
     n_negative_samples: Optional[int] = field(default=1)
     fixed_d_encoder: Optional[bool] = field(default=False)
@@ -45,18 +44,19 @@ class ReinforceOptions(TrainingArguments):
     num_processes: Optional[int] = field(default=1)
     remove_unused_columns: Optional[bool] = field(default=False)
     learning_rate: float = field(default=5e-5)
-    num_mini_batches: int = 2
-    quick_test: Optional[int] = field(default=None)
     update_epochs: Optional[int] = field(default=4)
-    reward_function: Optional[str] = field(default='metric')
-    ampere_gpu: Optional[bool] = field(default=False)
     generation_batch: Optional[int] = field(default=2)
     report_to: Optional[str] = field(default="wandb")
     ct_coef: Optional[float] = field(default=0.0)
     tc_coef: Optional[float] = field(default=0.0)
     mr_coef: Optional[float] = field(default=0.0)
-    rl_coef: Optional[Union[float, str]] = field(default=1.0)
+    rl_coef: Optional[float] = field(default=1.0)
     reg_coef: Optional[float] = field(default=1.0)
+    quick_test: Optional[int] = field(default=None)
+
+    # num_mini_batches: int = 2
+    # ampere_gpu: Optional[bool] = field(default=False)
+    # reward_function: Optional[str] = field(default='metric')
 
 @dataclass
 class LLMOptions:

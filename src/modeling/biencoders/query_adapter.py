@@ -9,13 +9,11 @@ class SparseAdaptiveEncoders(nn.Module):
         self, 
         q_encoder,
         encoder=None, 
-        n_candidates=None,
         **kwargs # opt is unused
     ):
         super().__init__()
         self.q_encoder = q_encoder
         self.encoder = (encoder or q_encoder)
-        self.n_candidates = n_candidates
         self.config = q_encoder.config
 
         for n, p in self.named_parameters():
@@ -78,7 +76,7 @@ class SparseAdaptiveEncoders(nn.Module):
             if d_tokens is not None:
                 labels_tc = []
 
-                n_candidates = min(self.n_candidates, len(d_tokens))
+                n_candidates = len(d_tokens)
                 for i in range(n_candidates):
                     d_output = self.encoder(d_tokens[i], d_masks[i])
                     d_indices = d_output.indices

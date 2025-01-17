@@ -34,7 +34,7 @@ import safetensors.torch
 
 from peft import PeftModel
 from transformers.modeling_utils import PreTrainedModel
-from transformers import Trainer as Trainer_hf
+from transformers import Trainer
 import ir_measures
 from ir_measures import nDCG, R
 from utils import (
@@ -63,30 +63,21 @@ def postprocess_output(output, tag='p'):
     output = re.sub(r"-\s", "", output).strip()
     return output
 
-class Trainer(Trainer_hf):
+class PolicyTrainer(Trainer):
 
-    def __init__(self, generator, index_dir=None, dense=False, lexical=False, **kwargs):
+    def __init__(self, generator, searcher=None, index_dir=None, **kwargs):
+        """ 
+        generator: a vllm wrapper model.
+        searcher: a pyserini seracher.
+        """
         super().__init__(**kwargs)
         self.generator = generator
-        self.searcher = load_searcher(
-            index_dir, 
-            lexical=lexical,
-            dense=dense
-        )
+        self.searcher = searcher
+        self.rep_type = 'sparse_doc'
+        self.annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=True)
 
-        if dense:
-            self.rep_type = 'dense'
-        elif lexical:
-            self.rep_type = 'sparse'
-            if 'doc' in index_dir:
-                self.rep_type = 'sparse_doc'
-
-<<<<<<< HEAD
-=======
-        self.annealer = Annealer(100, shape='logistic', cyclical=True)
-
->>>>>>> reinforce
-    def measure_ranking(self, pids_pred, pids_truth):
+    @staticmethod
+    def measure_ranking(pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
         run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
         result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[nDCG@10]
@@ -100,20 +91,12 @@ class Trainer(Trainer_hf):
     ):
         gen_batch = (self.args.generation_batch or 1)
 
-        if 'dense' in self.rep_type:
-            hits = self.searcher.batch_search(
-                queries=query.clone().float().detach().cpu().numpy(), 
-                q_ids=[str(i) for i in range(query.size()[0])],
-                k=self.args.n_max_candidates,
-                threads=32
-            )
-        elif 'sparse' in self.rep_type:
-            hits = self.searcher.batch_search(
-                logits=query.clone().float().detach().cpu().numpy(), 
-                q_ids=[str(i) for i in range(query.size()[0])],
-                k=self.args.n_max_candidates,
-                threads=32
-            )
+        hits = self.searcher.batch_search(
+            logits=query.clone().float().detach().cpu().numpy(), 
+            q_ids=[str(i) for i in range(query.size()[0])],
+            k=self.args.n_max_candidates,
+            threads=32
+        )
         hits = {int(k): v for k, v in hits.items()}
         hits = dict(sorted(hits.items()))
 
@@ -255,7 +238,7 @@ class Trainer(Trainer_hf):
         regularization_loss = reg_losses
         reinforce_loss = (rewards * (-logprobs)).mean()
 
-        if 'anneal' in self.args.rl_coef:
+        if self.args.rl_coef == -1:
             rl_coef = self.annealer(1.0)
             self.annealer.step()
         else:
