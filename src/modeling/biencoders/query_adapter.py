@@ -43,12 +43,17 @@ class SparseAdaptiveEncoders(nn.Module):
             reps = q_tokens
         else:
             if self.q_encoder.config.is_decoder:
+                # output = self.q_encoder(
+                #     input_ids=f_tokens,
+                #     attention_mask=f_masks,
+                #     sub_input_ids=q_tokens,
+                #     sub_attention_mask=q_masks,
+                #     sub_token_type_ids=kwargs.pop('sub_token_type_ids', None),
+                # )
                 output = self.q_encoder(
                     input_ids=f_tokens,
                     attention_mask=f_masks,
-                    sub_input_ids=q_tokens,
-                    sub_attention_mask=q_masks,
-                    sub_token_type_ids=kwargs.pop('sub_token_type_ids', None),
+                    token_type_ids=kwargs.pop('sub_token_type_ids', None),
                 )
             else:
                 output = self.q_encoder(

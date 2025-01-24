@@ -2,11 +2,13 @@ import torch
 import torch.nn as nn
 from transformers import BertForTokenClassification
 from modeling.outputs import SparseEncoderOutput
+from modeling.layers import AdaptiveBertEmbeddings
 
 class SparseEncoderForTokenClf(BertForTokenClassification):
     def __init__(self, config):
         config.num_labels = 2
         super().__init__(config)
+        self.bert.embeddings = AdaptiveBertEmbeddings(config)
 
     def forward(
         self,

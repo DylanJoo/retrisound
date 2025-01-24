@@ -232,21 +232,34 @@ class PolicyTrainer(Trainer):
         logs = torch.stack(logs, 0)
         logprobs = torch.stack(logprobs, 0)
         rewards = torch.stack(rewards, 0).to(logprobs.device)
+        baseline_rewards = torch.cat(
+            (torch.zeros(rewards.size(0), 1).to(rewards.device), rewards[:, :-1]), axis=-1
+        )
 
         contrastive_loss = ct_losses
         token_classification_loss = tc_losses
         regularization_loss = reg_losses
         reinforce_loss = (rewards * (-logprobs)).mean()
+        reinforce_loss = ( (rewards-baseline_rewards) * (-logprobs)).mean()
 
-        if self.args.rl_coef == -1:
-            rl_coef = self.annealer(1.0)
-            self.annealer.step()
-        else:
-            rl_coef = self.args.rl_coef
+        # if self.args.rl_coef == -1:
+        #     rl_coef = self.annealer(1.0)
+        #     tc_coef = 1 - rl_coef
+        # else:
+        #     rl_coef = self.args.rl_coef
+        #
+        # if self.args.ct_coef == -1:
+        #     ct_coef = self.annealer(1.0)
+        #     tc_coef = 1 - ct_coef
+        # else:
 
-        loss = (token_classification_loss * self.args.tc_coef) + \
-                (reinforce_loss * rl_coef) + \
-                (contrastive_loss * self.args.ct_coef) 
+        tc_coef = self.args.tc_coef
+        ct_coef = self.args.ct_coef
+        rl_coef = self.args.rl_coef
+
+        self.annealer.step()
+
+        loss = (token_classification_loss * tc_coef) + (reinforce_loss * rl_coef) + (contrastive_loss * ct_coef) 
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})

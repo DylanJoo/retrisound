@@ -122,10 +122,12 @@ class SparseAdaptiveEncoders(nn.Module):
                 pos_ratio = (labels_tc[0]>=1).sum()  / (labels_tc[0]!=-100).sum()
                 pos_ratio_pred = (select_tokens>=1).sum()  / (labels_tc[0]!=-100).sum()
 
-                ## L1: token classification
+                ## L2: contrastive learning 
                 d_reps = torch.stack(d_reps, dim=0)
                 q_rep = transform_weights_to_vector(
-                    select_tokens, output.logits[:, :, 1], self.config.vocab_size
+                    inputs=select_tokens, 
+                    weights=output.logits.softmax(-1)[:, :, 1], 
+                    vocab_size=self.config.vocab_size
                 )
 
                 scores_t = q_rep @ d_reps.view(-1, self.config.vocab_size).transpose(1, 0)   # B V x BN V

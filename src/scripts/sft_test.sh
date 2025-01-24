@@ -25,10 +25,11 @@ MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
 MODEL_SIZE=1B
 BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
-# dataset=litsearch
-dataset=beir-cellar/scidocs
+# BASE_LLM=Qwen/Qwen2.5-1.5B-Instruct
+dataset=litsearch
+# dataset=beir-cellar/scidocs
 # dataset=beir-cellar/fiqa
-dataset=msmarco-passage
+# dataset=beir-cellar/trec-covid
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
 echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
@@ -36,15 +37,15 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --config_file configs/default_config.yaml \
-    --main_process_port 29500 \
-    train2.py \
+    --main_process_port 29501 \
+    train4lsr_doc.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --train_file $DATASET_DIR/${dataset} \
     --split train \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 5e-4 \
+    --learning_rate 1e-3 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
@@ -56,10 +57,8 @@ accelerate launch \
     --num_steps 3 --n_max_segments 15 \
     --ct_coef 0.0 \
     --tc_coef 1.0 \
-    --reg_coef 0.0 \
-    --mr_coef 0.0 \
-    --rl_coef 0.0 \
+    --rl_coef 1.0 \
     --do_train \
     --fp16 \
     --index_dir /home/dju/indexes/${dataset}.lucene_doc \
-    --logging_steps 1 --run_name 'MLP(q, f)-(TC)-q_enc'
+    --logging_steps 1 --run_name 'MLP(q, f)-(TC+RL-baseline)-q_ad_embed'

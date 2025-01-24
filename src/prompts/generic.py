@@ -24,6 +24,15 @@ def apply_fbk_inst_prompt(Q, D, prefix="Report:\n"):
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
 
+### prompts for rewrite
+# prompt_report_gen = "Based on the given query and the given search results (some of them might be irrelevant), generate 10 sub-queries to expand searching scope. Add the `<p>` and `</p>` tags at the beginning and the end of 10 sub-queries."
+# template_report_gen = "{prompt_report}\n\nQuery: {Q}\nSearch results:\n{D}\nSub-queries:\n<p>"
+#
+# def apply_fbk_inst_prompt(Q, D, prefix="Report:\n"):
+#     p = template_report_gen.replace('{prompt_report}', prompt_report_gen)
+#     p = p.replace("{Q}", Q).replace("{D}", D)
+#     return p
+
 ### prompts for feedback (old)
 # prompt_report = "Write an accurate, engaging, and concise report for the given topic. Use only the provided search results (some of which might be irrelevant) and cite them properly. Always cite for any factual claim. Cite at least one document and at most three documents in each sentence."
 # template_report = "{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n:"
