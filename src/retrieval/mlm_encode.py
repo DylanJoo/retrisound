@@ -7,7 +7,7 @@ from transformers import AutoTokenizer
 from collections import defaultdict
 import sys
 from datasets import Dataset
-from modeling.base_encoder import SparseEncoder
+from modeling.encoder import SparseEncoder
 
 def batch_iterator(
     iterable, 
@@ -105,13 +105,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load models
-    model = SparseEncoder(
-        model_name_or_path=args.model_name_or_path, 
-        output="MLM",
-        agg="max",
-        activation='relu',
-        norm=False
-    ).eval()
+    model = SparseEncoder.from_pretrained(args.model_name_or_path).eval()
     model.to(args.device)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path or args.tokenizer_name)
     reverse_voc = {v: k for k, v in tokenizer.vocab.items()}

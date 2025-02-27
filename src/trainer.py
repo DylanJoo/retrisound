@@ -55,13 +55,13 @@ def transform_ids_to_vector(inputs, tokenizer, count=False):
         vector[:, idx] = 0
     return vector
 
-def postprocess_output(output, tag='p'):
-    output = output.split(f'</{tag}>')[0]
-    output = output.split('Query:')[0]
-    output = output.split('\n')[0]
-    output = re.sub(r"\d+\.\s", "", output).strip()
-    output = re.sub(r"-\s", "", output).strip()
-    return output
+# def postprocess_output(output, tag='p'):
+#     output = output.split(f'</{tag}>')[0]
+#     output = output.split('Query:')[0]
+#     output = output.split('\n')[0]
+#     output = re.sub(r"\d+\.\s", "", output).strip()
+#     output = re.sub(r"-\s", "", output).strip()
+#     return output
 
 class PolicyTrainer(Trainer):
 
@@ -78,6 +78,13 @@ class PolicyTrainer(Trainer):
 
     @staticmethod
     def measure_ranking(pids_pred, pids_truth):
+        qrel = {"dummy": pids_truth}
+        run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
+        result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[nDCG@10]
+        return result
+
+    @staticmethod
+    def measure_generation(pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
         run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
         result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[nDCG@10]
@@ -133,7 +140,6 @@ class PolicyTrainer(Trainer):
         for i in range(0, len(prompt), gen_batch):
             b_feedback = self.generator.generate(prompt[i:i+gen_batch])
             b_feedback = [remove_citations(f) for f in b_feedback]
-            b_feedback = [postprocess_output(f, 'p') for f in b_feedback]
             feedback += b_feedback
 
         return feedback
@@ -209,9 +215,6 @@ class PolicyTrainer(Trainer):
                     output.reps, questions, truth=qrels
                 )
                 feedback = self.compute_loss_feedback(questions, candidates)
-                # feedback = []
-                # for i, qrel in enumerate(qrels):
-                #     feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
 
                 ct_losses += output.loss_ct 
                 reg_losses += output.loss_flop 
@@ -232,26 +235,21 @@ class PolicyTrainer(Trainer):
         logs = torch.stack(logs, 0)
         logprobs = torch.stack(logprobs, 0)
         rewards = torch.stack(rewards, 0).to(logprobs.device)
-        baseline_rewards = torch.cat(
-            (torch.zeros(rewards.size(0), 1).to(rewards.device), rewards[:, :-1]), axis=-1
-        )
+        # baseline_rewards = torch.cat(
+        #     (torch.zeros(rewards.size(0), 1).to(rewards.device), rewards[:, :-1]), axis=-1
+        # )
 
-        contrastive_loss = ct_losses
-        token_classification_loss = tc_losses
-        regularization_loss = reg_losses
-        reinforce_loss = (rewards * (-logprobs)).mean()
-        reinforce_loss = ( (rewards-baseline_rewards) * (-logprobs)).mean()
-
+        # ignore after the reaching the optimal reward 
         # if self.args.rl_coef == -1:
         #     rl_coef = self.annealer(1.0)
         #     tc_coef = 1 - rl_coef
         # else:
         #     rl_coef = self.args.rl_coef
-        #
-        # if self.args.ct_coef == -1:
-        #     ct_coef = self.annealer(1.0)
-        #     tc_coef = 1 - ct_coef
-        # else:
+
+        contrastive_loss = ct_losses
+        token_classification_loss = tc_losses
+        regularization_loss = reg_losses
+        reinforce_loss = (rewards * (-logprobs)).mean()
 
         tc_coef = self.args.tc_coef
         ct_coef = self.args.ct_coef
@@ -332,3 +330,4 @@ class PolicyTrainer(Trainer):
                 safetensors.torch.save_model(self.model.q_encoder, os.path.join(output_dir, 'model.safetensors'))
             else:
                 torch.save(state_dict, os.path.join(output_dir, 'pytorch_model.bin'))
+

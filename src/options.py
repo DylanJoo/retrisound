@@ -15,6 +15,7 @@ class ModelOptions:
     max_new_tokens: Optional[int] = field(default=32)
     fusion_type: Optional[str] = field(default='ff')
     zero_init: bool = field(default=False)
+    num_layers: int = field(default=12)
     # num_budget: Optional[int] = field(default=5)
     # sft: bool = field(default=False)
     # samples: int = field(default=1)
@@ -29,7 +30,6 @@ class DataOptions:
     split: Optional[str] = field(default=None)
     depth: Optional[int] = field(default=30)
 
-# from trl.trainer.reward_config import RewardConfig
 from transformers import TrainingArguments
 @dataclass
 class ReinforceOptions(TrainingArguments):
@@ -53,10 +53,6 @@ class ReinforceOptions(TrainingArguments):
     rl_coef: Optional[float] = field(default=1.0)
     reg_coef: Optional[float] = field(default=1.0)
     quick_test: Optional[int] = field(default=None)
-
-    # num_mini_batches: int = 2
-    # ampere_gpu: Optional[bool] = field(default=False)
-    # reward_function: Optional[str] = field(default='metric')
 
 @dataclass
 class LLMOptions:

@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# coding=utf-8
 import os
 import json
 from dataclasses import asdict
@@ -17,21 +19,20 @@ def main():
     # [Retriever]
     from modeling.biencoders.query_adapter import SparseAdaptiveRetriever
     from modeling.encoder import SparseEncoder, SparseEncoderForTokenClf
-    encoder = SparseEncoder.from_pretrained(model_opt.retriever_name_or_path).eval()
+    encoder = SparseEncoder.from_pretrained(model_opt.retriever_name_or_path)
     q_encoder = SparseEncoderForTokenClf.from_pretrained(model_opt.retriever_name_or_path,
-        add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers
+        add_cross_attention=False, is_decoder=False, num_hidden_layers=1
     )
     retriever = SparseAdaptiveRetriever(q_encoder=q_encoder, encoder=encoder)
 
     # [Environment: Generator]
     from options import LLMOptions
-    from modeling.llm.vllm_back import LLM
-    from modeling.llm.hf_back import dummyLLM
+    from modeling.llm import vLLM, dummyLLM
     llm_opt = LLMOptions()
     if model_opt.generator_name_or_path is None:
         generator = dummyLLM()
     else:
-        generator = LLM(model=model_opt.generator_name_or_path, temperature=0.6)
+        generator = vLLM(model=model_opt.generator_name_or_path, temperature=0.7)
 
     # [Environment: Searcher]
     from utils import load_searcher
@@ -60,7 +61,6 @@ def main():
         searcher=searcher,
         tokenizer=tokenizer_r,
         train_dataset=dataset,
-        eval_dataset=dataset,
         data_collator=data_collator,
     )
     trainer.train()

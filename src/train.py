@@ -1,30 +1,13 @@
 #!/usr/bin/env python
 # coding=utf-8
-import argparse
-import logging
-import math
 import os
-import sys
-import random
-import datasets
-import torch
-from datasets import load_dataset
-from tqdm.auto import tqdm
 import json
 from dataclasses import asdict
-from copy import deepcopy
-
 from transformers import (
     HfArgumentParser,
-    AutoConfig,
     AutoTokenizer,
-    SchedulerType,
-    get_scheduler,
     set_seed
 )
-from transformers.utils import logging 
-
-logger = logging.get_logger("transformers")
 
 def main():
 
@@ -34,20 +17,13 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    # from modeling.base_encoder import SparseEncoder
-    # from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
-    # encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
-    # cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
-    # ada_retriever = SparseAdaptiveEncoders(
-    #     q_encoder=cattn_encoder, 
-    #     encoder=encoder,
-    #     n_candidates=train_opt.n_max_candidates
-    # )
-    from modeling.base_encoder_new import SparseEncoder
-    from modeling.biencoders.sparse_doc_crossattn import SparseAdaptiveEncoders
+    from modeling.base_encoder import SparseEncoder
+    from modeling.biencoders.sparse_crossattn import SparseAdaptiveEncoders
+    encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False)
     cattn_encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=True)
     ada_retriever = SparseAdaptiveEncoders(
         q_encoder=cattn_encoder, 
+        encoder=encoder,
         n_candidates=train_opt.n_max_candidates
     )
 

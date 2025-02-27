@@ -24,8 +24,11 @@ MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
 MODEL_SIZE=1B
 BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
-# BASE_LLM=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
-dataset=litsearch
+BASE_LLM=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+# dataset=litsearch
+dataset=inpars-v2/trec-covid
+dataset=inpars-v2/scidocs
+# dataset=inpars-v2/climate-fever
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
 echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
@@ -42,6 +45,7 @@ accelerate launch \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 1e-3 \
+    --num_layers 1 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
@@ -52,9 +56,9 @@ accelerate launch \
     --n_contexts 10 --n_max_candidates 10 --n_negative_samples 10 \
     --num_steps 3 --n_max_segments 15 \
     --ct_coef 0.0 \
-    --tc_coef 0.5 \
+    --tc_coef 1.0 \
     --rl_coef 1.0 \
     --do_train \
     --fp16 \
-    --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.litsearch.abstracts.lucene \
-    --logging_steps 1 --run_name 'MLP(q, f)-(TC+RL)-TC_0.5-RL_1'
+    --index_dir ${INDEX_DIR}/${dataset/inpars-v2/beir-cellar}.lucene_doc \
+    --logging_steps 1 --run_name 'MLP(q, f)-(TC+RL)-TC_1-RL_1'

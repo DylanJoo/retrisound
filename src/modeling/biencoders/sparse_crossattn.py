@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from transformers import AutoConfig
-from modeling.layers import STEFunction
 from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
 
 class SparseAdaptiveEncoders(nn.Module):
@@ -18,7 +17,7 @@ class SparseAdaptiveEncoders(nn.Module):
         self.q_encoder = q_encoder
         self.encoder = (encoder or q_encoder)
         self.n_candidates = n_candidates
-        self.binarize = STEFunction()
+        self.config = q_encoder.model.config
 
         # REVISED
         for n, p in self.named_parameters():

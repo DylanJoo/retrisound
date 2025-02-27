@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from typing import List
 from transformers.models.bert.modeling_bert import BertEmbeddings
 
+def normalize(tensor, eps=1e-9):
+    return tensor / (torch.norm(tensor, dim=-1, keepdim=True) + eps)
+
 class STEFunction(torch.autograd.Function):
 
     @staticmethod

@@ -1,7 +1,9 @@
 import random
+import json
 import datetime
 import torch
 import numpy as np
+from glob import glob
 from tqdm import tqdm
 from torch.utils.data import Dataset
 from collections import defaultdict
@@ -18,15 +20,12 @@ import csv
 from beir.datasets.data_loader import GenericDataLoader
 
 class PRFDataset(Dataset):
-
     def __init__(
         self, 
         dataset_dir, 
         split='test',
-        n_max_segments=10, 
+        n_max_segments=10,
         n_negative_samples=2,
-        another_split_for_eval=None,
-        judgement_file=None,
         quick_test=None,
         **kwargs
     ):
@@ -39,28 +38,14 @@ class PRFDataset(Dataset):
         self.corpus = corpus
         self.split = split
 
-        # load another additional qrels if needed.
-        if (another_split_for_eval is not None) and (split == 'train'):
-            qrels_file = os.path.join(self.qrels_folder, another_split_for_eval + ".tsv")
-            reader = csv.reader(open(qrels_file, encoding="utf-8"), delimiter="\t", quoting=csv.QUOTE_MINIMAL)
-            next(reader)
-            for id, row in enumerate(reader):
-                query_id, corpus_id, score = row[0], row[1], int(row[2])
-                if query_id not in self.eval_qrels:
-                    self.eval_qrels[query_id] = {corpus_id: score}
-                else:
-                    self.eval_qrels[query_id][corpus_id] = score
-
         if split != 'test':
             self.length = len(self.queries)
             self.ids = list(self.queries.keys())
             self.corpus_ids = list(self.corpus.keys())
-
-        if split == 'test':
-            self.length = len(self.corpus)
-            self.ids = list(self.corpus.keys())
-            self.corpus_ids = list(self.corpus.keys())
-            self.pseudo_queries = self.get_random_crop()
+        else:
+            for qid in self.qrels:
+                judged_docids = [docid for docid in self.qrels[qid]]
+            self.corpus = {id: passage for id, passage in self.corpus.items() if id in judged_docids}
 
         ## training attributes
         self.n_max_segments = n_max_segments
@@ -95,14 +80,10 @@ class PRFDataset(Dataset):
         id = self.ids[idx]
 
         n = self.n_feedbacks[idx]
-        if self.split == 'test':
-            query = self.queries[id] if n==0 else self.feedbacks[idx][n-1] # here maybe needs perturbation
-            positives = self.corpus[id]
-        else:
-            query = self.queries[id]
-            candidate_positive_ids = [pid for pid, score in self.qrels[id].items() if int(score) >= 1]
-            positive_id = random.sample(candidate_positive_ids, 1)[0]
-            positive = self.corpus[positive_id]
+        query = self.queries[id]
+        candidate_positive_ids = [pid for pid, score in self.qrels[id].items() if int(score) >= 1]
+        positive_id = random.sample(candidate_positive_ids, 1)[0]
+        positive = self.corpus[positive_id]
 
         try:
             candidate_negative_ids = [pid for pid, score in self.qrels[id].items() if score < 1]
