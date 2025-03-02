@@ -20,13 +20,25 @@ MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 MULTIJOBS=/home/dju/temp/wikipedia_split_dpr_multijobs.txt
 
 # Generate embeddings
+
+# IR benchmarks 
+# python -m retrieval.mlm_encode \
+#     --model_name_or_path ${RETRIEVER} \
+#     --tokenizer_name ${RETRIEVER} \
+#     --collection ${DATASET_DIR}/${each}/corpus.jsonl \
+#     --collection_output ${INDEX_DIR}/${each}.encoded/vectors_doc.jsonl \
+#     --batch_size 384 \
+#     --max_length 256 \
+#     --quantization_factor 100
+
+# wiki
 each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 echo $each
 python3 -m retrieval.mlm_encode \
     --model_name_or_path ${RETRIEVER} \
     --tokenizer_name ${RETRIEVER} \
     --collection /home/dju/datasets/${each} \
-    --collection_output /home/dju/indexes/wikipedia_split_dpr/encoded/splade-v3-doc.wikipedia_split_dpr.${each##*\jsonl}.jsonl \
+    --collection_output /home/dju/indexes/wikipedia_split_dpr/encoded/vectors_doc.${each##*\jsonl}.jsonl \
     --batch_size 384 \
     --max_length 256 \
     --quantization_factor 100
