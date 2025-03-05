@@ -58,8 +58,8 @@ class SparseAdaptiveRetriever(nn.Module):
 
             # add sampling here
             action, logprob = sample_actions(output.logits, samples=2)
-            action = action[self.selected_sample]
-            logprob = logprob[self.selected_sample]
+            action = action[-1]
+            logprob = logprob[-1]
             select_tokens = torch.where(
                 action[:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
             )
