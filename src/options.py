@@ -27,6 +27,7 @@ class DataOptions:
     corpus_file: Optional[str] = field(default=None)
     retrieval_file: Optional[str] = field(default=None)
     judgement_file: Optional[str] = field(default=None)
+    eval_file: Optional[str] = field(default=None)
     split: Optional[str] = field(default=None)
     depth: Optional[int] = field(default=30)
 
@@ -52,6 +53,7 @@ class ReinforceOptions(TrainingArguments):
     mr_coef: Optional[float] = field(default=0.0)
     rl_coef: Optional[float] = field(default=1.0)
     reg_coef: Optional[float] = field(default=1.0)
+    sample_type: Optional[str] = field(default='deterministic')
     quick_test: Optional[int] = field(default=None)
 
 @dataclass

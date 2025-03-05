@@ -102,6 +102,7 @@ if __name__ == '__main__':
     parser.add_argument("--quantization_factor", type=int, default=1000)
     parser.add_argument("--device", type=str, default='cuda')
     parser.add_argument("--minimum", type=float, default=0)
+    parser.add_argument("--n_docs_per_shard", type=int, default=1000000)
     args = parser.parse_args()
 
     # load models
@@ -117,7 +118,8 @@ if __name__ == '__main__':
         for line in tqdm(f):
             item = json.loads(line.strip())
             if 'contents' not in item.keys(): # for beir-cellar
-                item['id'] = item['_id']
+                if 'id' not in item.keys():
+                    item['id'] = item['_id']
                 item['contents'] = (item.get('title', "") + " " + item['text']).strip()
             if 'title' not in item.keys():
                 item['title'] = ''

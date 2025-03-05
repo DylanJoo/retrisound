@@ -2,9 +2,9 @@
 #SBATCH --job-name=encode
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --nodes=1
-#SBATCH --array=3-22%2
+#SBATCH --array=1-3%1
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 
@@ -18,8 +18,7 @@ cd ~/retrisound/src/
 RETRIEVER=naver/splade-v3-doc
 MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 MULTIJOBS=/home/dju/temp/wikipedia_split_dpr_multijobs.txt
-
-# Generate embeddings
+MULTIJOBS=/home/dju/temp/neuclir_multijobs.txt
 
 # IR benchmarks 
 # python -m retrieval.mlm_encode \
@@ -31,14 +30,26 @@ MULTIJOBS=/home/dju/temp/wikipedia_split_dpr_multijobs.txt
 #     --max_length 256 \
 #     --quantization_factor 100
 
-# wiki
+# QA benchmarks: wiki
+# each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
+# echo $each
+# python3 -m retrieval.mlm_encode \
+#     --model_name_or_path ${RETRIEVER} \
+#     --tokenizer_name ${RETRIEVER} \
+#     --collection /home/dju/datasets/${each} \
+#     --collection_output /home/dju/indexes/wikipedia_split_dpr/encoded/vectors_doc.${each##*\jsonl}.jsonl \
+#     --batch_size 384 \
+#     --max_length 256 \
+#     --quantization_factor 100
+
+# NeuCLIR
 each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 echo $each
 python3 -m retrieval.mlm_encode \
     --model_name_or_path ${RETRIEVER} \
     --tokenizer_name ${RETRIEVER} \
-    --collection /home/dju/datasets/${each} \
-    --collection_output /home/dju/indexes/wikipedia_split_dpr/encoded/vectors_doc.${each##*\jsonl}.jsonl \
+    --collection /home/dju/datasets/${each}/corpus.jsonl \
+    --collection_output /home/dju/indexes/${each}/encoded/vectors_doc.${each##*\jsonl}.jsonl \
     --batch_size 384 \
     --max_length 256 \
     --quantization_factor 100

@@ -27,6 +27,7 @@ class PRFDataset(Dataset):
         n_max_segments=10,
         n_negative_samples=2,
         quick_test=None,
+        max_examples=None,
         **kwargs
     ):
         # nq has separated set
@@ -43,9 +44,15 @@ class PRFDataset(Dataset):
             self.ids = list(self.queries.keys())
             self.corpus_ids = list(self.corpus.keys())
         else:
+            max_qrels = random.sample(self.qrels.keys(), len(self.qrels))[:max_examples]
+            self.qrels = {k: self.qrels[k] for k in max_qrels}
+            self.length = len(self.qrels)
+            self.ids = list(self.qrels.keys())
+            judged_docids = []
             for qid in self.qrels:
-                judged_docids = [docid for docid in self.qrels[qid]]
+                judged_docids += [docid for docid in self.qrels[qid]]
             self.corpus = {id: passage for id, passage in self.corpus.items() if id in judged_docids}
+            self.corpus_ids = list(self.corpus.keys())
 
         ## training attributes
         self.n_max_segments = n_max_segments
@@ -81,17 +88,22 @@ class PRFDataset(Dataset):
 
         n = self.n_feedbacks[idx]
         query = self.queries[id]
-        candidate_positive_ids = [pid for pid, score in self.qrels[id].items() if int(score) >= 1]
-        positive_id = random.sample(candidate_positive_ids, 1)[0]
+
+        # positive
+        judged_positive_ids = [pid for pid, score in self.qrels[id].items() if int(score) >= 1]
+        positive_id = random.sample(judged_positive_ids, 1)[0]
         positive = self.corpus[positive_id]
 
+        # negative (use judged if it has)
         try:
-            candidate_negative_ids = [pid for pid, score in self.qrels[id].items() if score < 1]
-            negative_ids = random.sample(candidate_negative_ids, self.n_negative_samples)
-            negatives = [self.corpus[pid] for pid in negative_ids]
+            judged_negative_ids = [pid for pid, score in self.qrels[id].items() if score < 1]
         except:
-            negative_ids = random.sample(self.corpus_ids, self.n_negative_samples)
-            negatives = [self.corpus[pid] for pid in negative_ids]
+            judged_negative_ids = []
+
+        negative_ids = random.sample(
+                self.corpus_ids, max(0, self.n_negative_samples - len(judged_negative_ids))
+            ) + judged_negative_ids[:self.n_negative_samples]
+        negatives = [self.corpus[pid] for pid in negative_ids]
 
         # outputs
         return {'index': idx,

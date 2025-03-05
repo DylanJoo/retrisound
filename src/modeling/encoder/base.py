@@ -48,7 +48,6 @@ class SparseEncoder(BertForMaskedLM):
             torch.log(1 + torch.relu(logits)) 
             * attention_mask.unsqueeze(-1), dim=1
         )
-
         nonzero_indices = [row.nonzero(as_tuple=False).squeeze(1) for row in values]
 
         return SparseEncoderOutput(

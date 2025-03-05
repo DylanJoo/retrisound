@@ -16,6 +16,11 @@ class SparseAdaptiveRetriever(nn.Module):
         self.encoder = (encoder or q_encoder)
         self.config = q_encoder.config
 
+        if kwargs.get('sample_type') == 'deterministic':
+            self.selected_sample = 0
+        if kwargs.get('sample_type') == 'random':
+            self.selected_sample = 1
+
         for n, p in self.named_parameters():
             if 'q_encoder' in n:
                 p.requires_grad = True
@@ -34,8 +39,8 @@ class SparseAdaptiveRetriever(nn.Module):
     ):
         q_reps, d_reps = None, []
         loss_tc, loss_ct, loss_mr = None, None, None
-        pos_ratio = 0 
-        pos_ratio_pred = 0
+        pos_ratio_truth = 0 
+        pos_ratio = 0
         logprob = None
 
         if (step == 0) and (prev_output is None):
@@ -53,9 +58,10 @@ class SparseAdaptiveRetriever(nn.Module):
 
             # add sampling here
             action, logprob = sample_actions(output.logits, samples=2)
-            logprob = logprob[0]
+            action = action[self.selected_sample]
+            logprob = logprob[self.selected_sample]
             select_tokens = torch.where(
-                action[0][:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
+                action[:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
             )
 
             # expand tokens
@@ -71,14 +77,13 @@ class SparseAdaptiveRetriever(nn.Module):
                     d_output = self.encoder(d_tokens[i], d_masks[i])
                     d_indices = d_output.indices
                     d_reps.append(d_output.reps)
-                    # label = make_labels(d_indices, candidate_tokens, candidate_masks)
-                    label = make_labels(d_indices, candidate_tokens, candidate_masks, q_tokens)
+                    label = make_labels(d_indices, candidate_tokens, candidate_masks)
                     labels_tc.append(label)
 
                 ## L1: token classification
                 loss_tc = CELoss(output.logits.view(-1, 2), labels_tc[0].view(-1))
-                pos_ratio = (labels_tc[0]>=1).sum()  / (labels_tc[0]!=-100).sum()
-                pos_ratio_pred = (select_tokens>=1).sum()  / (labels_tc[0]!=-100).sum()
+                pos_ratio_truth = (labels_tc[0]>=1).sum()  / (labels_tc[0]!=-100).sum()
+                pos_ratio = (select_tokens>=1).sum()  / (labels_tc[0]!=-100).sum()
 
                 ## L2: contrastive learning
                 d_reps = torch.stack(d_reps, dim=0)
@@ -98,7 +103,7 @@ class SparseAdaptiveRetriever(nn.Module):
             loss_mr=torch.tensor([0.0]),
             loss_flop=torch.tensor([0.0]),
             loss_tc=loss_tc,
-            logs={'InfoNCE': loss_ct, 'PosRatio': pos_ratio, 'PosRatioPred': pos_ratio_pred},
+            logs={'InfoNCE': loss_ct, 'PosRatioTruth': pos_ratio_truth, 'PosRatio': pos_ratio},
             logprobs=logprob,
             logits=output.logits,
         )

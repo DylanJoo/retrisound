@@ -8,7 +8,7 @@ class SparseEncoderForTokenClf(BertForTokenClassification):
     def __init__(self, config):
         config.num_labels = 2
         super().__init__(config)
-        self.mlp = nn.Linear(config.hidden_size, config.hidden_size)
+        # self.mlp = nn.Linear(config.hidden_size, config.hidden_size)
 
     def forward(
         self,

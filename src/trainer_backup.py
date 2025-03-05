@@ -42,7 +42,6 @@ from utils import (
     load_searcher
 )
 from tools.annealing import Annealer
-from modeling.llm.utils import remove_citations, replace_tags
 
 def transform_ids_to_vector(inputs, tokenizer, count=False):
     vector = torch.zeros(inputs.size(0), tokenizer.vocab_size).to(inputs.device)
@@ -55,6 +54,14 @@ def transform_ids_to_vector(inputs, tokenizer, count=False):
     for tok, idx in tokenizer.get_added_vocab().items():
         vector[:, idx] = 0
     return vector
+
+# def postprocess_output(output, tag='p'):
+#     output = output.split(f'</{tag}>')[0]
+#     output = output.split('Query:')[0]
+#     output = output.split('\n')[0]
+#     output = re.sub(r"\d+\.\s", "", output).strip()
+#     output = re.sub(r"-\s", "", output).strip()
+#     return output
 
 class PolicyTrainer(Trainer):
 
@@ -121,6 +128,9 @@ class PolicyTrainer(Trainer):
 
         gen_batch = (self.args.generation_batch or 1)
 
+        def remove_citations(sent):
+            return re.sub(r"\[\d+", "", re.sub(r" \[\d+", "", sent)).replace(" |", "").replace("]", "")
+
         prompt = augmentation_feedback(
             questions=questions, 
             candidates=contexts, 
@@ -130,7 +140,6 @@ class PolicyTrainer(Trainer):
         for i in range(0, len(prompt), gen_batch):
             b_feedback = self.generator.generate(prompt[i:i+gen_batch])
             b_feedback = [remove_citations(f) for f in b_feedback]
-            b_feedback = [replace_tags(f, 'p') for f in b_feedback]
             feedback += b_feedback
 
         return feedback
@@ -159,8 +168,7 @@ class PolicyTrainer(Trainer):
         reg_losses = 0
         tc_losses = 0
         rewards = []
-        pos_ratio_truth = []
-        pos_ratio = []
+        logs = []
         for t in range(0, self.args.num_steps+1):
 
             if t == 0:
@@ -178,6 +186,10 @@ class PolicyTrainer(Trainer):
                 )
 
                 feedback = self.compute_loss_feedback(questions, candidates)
+                # feedback = []
+                # for i, qrel in enumerate(qrels):
+                #     feedback.append(self.train_dataset.corpus[list(qrel.keys())[0]]['text'])
+
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -209,8 +221,7 @@ class PolicyTrainer(Trainer):
                 tc_losses += output.loss_tc
 
                 rewards.append(reward)
-                pos_ratio_truth.append(output.logs['PosRatioTruth'])
-                pos_ratio.append(output.logs['PosRatio'])
+                logs.append(output.logs['PosRatioPred'])
 
                 # reinforcement
                 logprobs.append(output.logprobs) # B L 2
@@ -221,8 +232,7 @@ class PolicyTrainer(Trainer):
             for j in range(len(data_indices)):
                 self.train_dataset.add_feedback(data_indices[j], feedback[j])
 
-        pos_ratio_truth = torch.stack(pos_ratio_truth, 0)
-        pos_ratio = torch.stack(pos_ratio, 0)
+        logs = torch.stack(logs, 0)
         logprobs = torch.stack(logprobs, 0)
         rewards = torch.stack(rewards, 0).to(logprobs.device)
         # baseline_rewards = torch.cat(
@@ -251,8 +261,7 @@ class PolicyTrainer(Trainer):
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})
-        self.log({"train/pos_ratio_truth": pos_ratio_truth.mean().item()})
-        self.log({"train/pos_ratio": pos_ratio.mean().item()})
+        self.log({"train/pos_ratio": logs.mean().item()})
         self.log({"loss/RL": reinforce_loss.mean().item()})
         self.log({"loss/CT": contrastive_loss.mean().item()})
         self.log({"loss/TC": token_classification_loss.mean().item()})
@@ -322,121 +331,3 @@ class PolicyTrainer(Trainer):
             else:
                 torch.save(state_dict, os.path.join(output_dir, 'pytorch_model.bin'))
 
-    def evaluate(
-        self,
-        eval_dataset=None,
-        ignore_keys=None,
-        metric_key_prefix="eval",
-    ):
-        # Set up metric storage
-        metrics = {}
-        eval_dataloader = self.get_eval_dataloader(eval_dataset)
-        
-        # Run the iterative evaluation for testing
-        with torch.no_grad():
-            eval_metrics = self.iteration_loop(
-                eval_dataloader,
-                description=f"Evaluation ({metric_key_prefix})",
-                ignore_keys=ignore_keys,
-                metric_key_prefix=metric_key_prefix,
-            )
-        
-        metrics.update(eval_metrics)
-        self.log(metrics)
-        
-        return metrics
-
-    def iteration_loop(
-        self,
-        dataloader,
-        description,
-        ignore_keys=None,
-        metric_key_prefix="eval",
-    ):
-        # Initialize metrics
-        metrics = {}
-        total_rewards = []
-        all_reps = []
-                
-        # Initialize metrics for this batch
-        ct_losses = 0
-        reg_losses = 0
-        tc_losses = 0
-        logs = []
-        logprobs = []
-        reps = []
-        all_rewards = []
-
-        for batch in dataloader:
-
-            questions = batch["query"]
-            data_indices = batch["index"]
-            ids = [self.eval_dataset.ids[idx] for idx in data_indices]
-            qrels = [self.eval_dataset.qrels[id] for id in ids]
-
-            rewards = []
-            for t in range(0, 2):
-                if t == 0:
-                    retriever_inputs = batch["inputs_for_retriever"]
-                    output = self.model(
-                        q_tokens=retriever_inputs['q_tokens'][0],
-                        q_masks=retriever_inputs['q_masks'][0],
-                        step=0,
-                    )
-                    output.reps = transform_ids_to_vector(
-                        output.reps, self.tokenizer, count=True
-                    )
-                    reward_0, candidates = self.compute_loss_reward(
-                        output.reps, questions, truth=qrels
-                    )
-                    feedback = self.compute_loss_feedback(questions, candidates)
-
-                    candidates_0 = candidates
-                    q_out = output
-
-                    rewards.append(reward_0.detach().cpu())
-                else:
-                    retriever_inputs = self.data_collator.get_inputs_for_retriever(
-                        [self.eval_dataset[idx] for idx in data_indices],
-                        device=self.args.device
-                    )
-                    output = self.model(
-                        q_tokens=retriever_inputs['q_tokens'][0],
-                        q_masks=retriever_inputs['q_masks'][0],
-                        f_tokens=retriever_inputs['q_tokens'][t],
-                        f_masks=retriever_inputs['q_masks'][t],
-                        d_tokens=retriever_inputs['d_tokens'],
-                        d_masks=retriever_inputs['d_masks'],
-                        prev_output=output,
-                        sub_token_type_ids=retriever_inputs['q_types'][t],
-                        step=t,
-                    )
-                    output.reps = transform_ids_to_vector(
-                        output.reps, self.tokenizer, count=True
-                    )
-                    reward, candidates = self.compute_loss_reward(
-                        output.reps, questions, truth=qrels
-                    )
-                    feedback = self.compute_loss_feedback(questions, candidates)
-                
-                    ct_losses += output.loss_ct
-                    reg_losses += output.loss_flop
-                    tc_losses += output.loss_tc
-                
-                    rewards.append(reward.detach().cpu())
-
-                # Store feedback 
-                for j in range(len(data_indices)):
-                    # You might want to store this differently for evaluation
-                    self.eval_dataset.add_feedback(data_indices[j], feedback[j])
-
-            # finish one batch
-            rewards = torch.stack(rewards, 1) # B N
-            all_rewards.append(rewards)
-
-        all_rewards = torch.concat(all_rewards)
-        max_values, max_indices = all_rewards.max(-1)
-        metrics['value'] = max_values.mean().item()
-        metrics['index'] = max_indices.mean(dtype=torch.float).item()
-        print("\n\n", metrics, "\n\n")
-        return metrics

@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=5hr.res
+#SBATCH --job-name=5hr.litsearch
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -24,7 +24,6 @@ MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
 MODEL_SIZE=1B
 BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
-# BASE_LLM=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 dataset=litsearch
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
@@ -33,13 +32,16 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
-    --main_process_port 29600 \
+    --main_process_port 29601 \
     train4lsr_doc.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --train_file $DATA_DIR/${dataset} \
+    --num_layers 12 \
     --split train \
+    --sample_type deterministic \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
+    --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 1e-3 \
     --lr_scheduler_type cosine \
@@ -49,12 +51,12 @@ accelerate launch \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 4 \
-    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 10 \
+    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
     --num_steps 3 --n_max_segments 15 \
     --ct_coef 0.0 \
-    --tc_coef 0.5 \
+    --tc_coef 1.0 \
     --rl_coef 1.0 \
     --do_train \
     --fp16 \
     --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.litsearch.abstracts.lucene \
-    --logging_steps 1 --run_name 'MLP(q, f)-(TC+RL)-TC_0.5-RL_1'
+    --logging_steps 1 --run_name 'litsearch-test-deterministic'
