@@ -245,7 +245,7 @@ class PolicyTrainer(Trainer):
         ct_coef = self.args.ct_coef
         rl_coef = self.args.rl_coef
 
-        self.annealer.step()
+        # self.annealer.step()
 
         loss = (token_classification_loss * tc_coef) + (reinforce_loss * rl_coef) + (contrastive_loss * ct_coef) 
 

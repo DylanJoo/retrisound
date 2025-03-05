@@ -1,16 +1,17 @@
 #!/bin/sh
-#SBATCH --job-name=5hr.litsearch
+#SBATCH --job-name=10hr.litsearch
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=05:00:00
+#SBATCH --time=10:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
 . /home/dju/miniconda3/etc/profile.d/conda.sh
+source ${HOME}/.bashrc
 conda activate retrisound
 export CUDA_HOME=/usr/local/cuda
 cd /home/dju/retrisound/src/
@@ -32,7 +33,7 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
-    --main_process_port 29601 \
+    --main_process_port 29600 \
     train4lsr_doc.py \
     --retriever_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
@@ -41,7 +42,6 @@ accelerate launch \
     --split train \
     --sample_type deterministic \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
-    --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 1e-3 \
     --lr_scheduler_type cosine \
@@ -55,8 +55,9 @@ accelerate launch \
     --num_steps 3 --n_max_segments 15 \
     --ct_coef 0.0 \
     --tc_coef 1.0 \
-    --rl_coef 1.0 \
+    --rl_coef 0.0 \
     --do_train \
     --fp16 \
     --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.litsearch.abstracts.lucene \
-    --logging_steps 1 --run_name 'litsearch-test-deterministic'
+source ${HOME}/.bashrc
+    --logging_steps 1 --run_name 'litsearch-deterministic.TC1+RL1'

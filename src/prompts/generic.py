@@ -15,16 +15,18 @@ def apply_docs_prompt(doc_items, field='text'):
     return p
 
 ### prompts for feedback
-prompt_report_gen = "Write a passage that answers the given query. Use the provided search results (some of them might be irrelevant) to draft the passage. Cite the documents if they are relevant. Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
+prompt_report_gen = "Write a passage that answers the given query. Use the provided search results to draft the answer (some of the search results might be irrelevant). Cite the search results if they are relevant. Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
 template_report_gen = "{prompt_report}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage: <p>"
-
-# prompt_report_gen = "Write a passage that answers the given query: {Q}. Use your remembered documents and identify the relevant information to draft the passage. Write the passage within 100 words."
-# template_report_gen = "{prompt_report}\n\n<think>\nOkay, so I need to first recall a few relevant documents that are related to the query. Let me list these docuemnts first.\n{D}\nNow, I know how to write the passage to answer the query.</think>\n\n"
 
 def apply_fbk_inst_prompt(Q, D, prefix=None):
     p = template_report_gen.replace('{prompt_report}', prompt_report_gen)
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
+
+### prompts for thinking models
+# prompt_report_gen = "Write a passage that answers the given query: {Q}. Use your remembered documents and identify the relevant information to draft the passage. Write the passage within 100 words."
+# template_report_gen = "{prompt_report}\n\n<think>\nOkay, so I need to first recall a few relevant documents that are related to the query. Let me list these docuemnts first.\n{D}\nNow, I know how to write the passage to answer the query.</think>\n\n"
+
 
 ### prompts for rewrite
 # prompt_report_gen = "Based on the given query and the given search results (some of them might be irrelevant), generate 10 sub-queries to expand searching scope. Add the `<p>` and `</p>` tags at the beginning and the end of 10 sub-queries."

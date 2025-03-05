@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from transformers import BertForTokenClassification
 from modeling.outputs import SparseEncoderOutput
-# from modeling.layers import AdaptiveBertEmbeddings
 
 class SparseEncoderForTokenClf(BertForTokenClassification):
     def __init__(self, config):
@@ -42,6 +41,7 @@ class SparseEncoderForTokenClf(BertForTokenClassification):
             output_hidden_states=True,
         )
 
+        # last_hidden_states = self.mlp(outputs[0])
         last_hidden_states = outputs[0]
         tok_logits = self.classifier(last_hidden_states)
         nonzero_indices = None

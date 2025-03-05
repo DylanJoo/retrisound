@@ -147,7 +147,7 @@ def load_searcher(path, lexical=False, sparse=False):
     searcher = None
     if lexical:
         from _impact_searcher import LuceneImpactSearcher
-        searcher = LuceneImpactSearcher(path, 'naver/splade-v3')
+        searcher = LuceneImpactSearcher(path, 'naver/splade-v3-doc')
     if sparse:
         from pyserini.search.lucene import LuceneSearcher
         searcher = LuceneSearcher(path)
