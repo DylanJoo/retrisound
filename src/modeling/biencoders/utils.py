@@ -34,28 +34,15 @@ def sample_actions(logits, samples=1, attention_mask=None):
 
     return actions, logprobs
 
-# def sample_actions(logits, samples=1, attention_mask=None):
-#     actions, logprobs = [], []
-#     probs = logits.softmax(-1)
-#     m = torch.distributions.one_hot_categorical.OneHotCategorical(probs)
-#
-#     for i in range(samples):
-#         if i == 0:
-#             action = torch.zeros_like(logits).scatter_(2, logits.argmax(-1).unsqueeze(-1), 1.)
-#             action = action.type(logits.dtype)
-#         else:
-#             action = m.sample()
-#
-#         if attention_mask is not None: # action [B L 2]; logp [B L]
-#             seq_logprob = m.log_prob(action) * attention_mask
-#             logprob = seq_logprob.sum(-1) / attention_mask.sum(-1)
-#             logprobs.append(logprob)
-#             action = action * attention_mask.unsqueeze(-1)
-#             actions.append(action)
-#         else:
-#             logprob = m.log_prob(action).mean(-1)
-#             actions.append(action)
-#             logprobs.append(logprob)
-#
-#     return actions, logprobs
-#
+def transform_ids_to_vector(inputs, tokenizer=None, count=False):
+    vector = torch.zeros(inputs.size(0), tokenizer.vocab_size).to(inputs.device)
+    if count:
+        vector = vector.scatter_add(1, inputs, torch.ones_like(inputs, dtype=vector.dtype))
+    else:
+        vector = vector.scatter(1, inputs, 1)
+
+    # clean the added tokens
+    if tokenzier is not None:
+        for tok, idx in tokenizer.get_added_vocab().items():
+            vector[:, idx] = 0
+    return vector

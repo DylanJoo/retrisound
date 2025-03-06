@@ -38,13 +38,14 @@ accelerate launch \
     --query_encoder_name_or_path bert-base-uncased \
     --generator_name_or_path $BASE_LLM \
     --train_file $DATA_DIR/${dataset} \
+    --eval_file $DATA_DIR/${dataset} \
     --num_layers 1 \
     --split train \
     --sample_type random \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 1e-3 \
+    --learning_rate 1e-4 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
@@ -58,6 +59,9 @@ accelerate launch \
     --tc_coef 1.0 \
     --rl_coef 1.0 \
     --do_train \
+    --do_eval \
+    --eval_strategy steps \
+    --eval_steps 50 \
     --fp16 \
     --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.litsearch.abstracts.lucene \
     --logging_steps 1 --run_name 'litsearch:random:TC1+RL1'
