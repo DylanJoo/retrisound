@@ -2,7 +2,26 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
-from modeling.biencoders.utils import make_labels, transform_weights_to_vector, sample_actions
+# from modeling.biencoders.utils import make_labels, transform_weights_to_vector, sample_actions
+from modeling.biencoders.utils import sample_actions
+
+
+def make_labels(d_tokens, candidate_tokens, candidate_masks, q_tokens=None):
+    binary_matrix = torch.zeros_like(candidate_tokens)
+    for i in range(len(d_tokens)):
+        binary_matrix[i] = (candidate_tokens[i].unsqueeze(1) == d_tokens[i]).any(dim=1)
+        if q_tokens is not None:
+            binary_matrix[i] += (candidate_tokens[i].unsqueeze(1) == q_tokens[i]).any(dim=1)
+
+    # mask unused token
+    mask_matrix = torch.full_like(binary_matrix, -100)
+    binary_matrix = torch.where(candidate_masks==0, mask_matrix, binary_matrix)
+    return binary_matrix.to(candidate_tokens.device)
+
+def transform_weights_to_vector(inputs, weights, vocab_size):
+    vector = torch.zeros(inputs.size(0), vocab_size, dtype=weights.dtype).to(inputs.device)
+    vector = vector.scatter(1, inputs, weights)
+    return vector
 
 class SparseAdaptiveRetriever(nn.Module):
     def __init__(
@@ -58,10 +77,10 @@ class SparseAdaptiveRetriever(nn.Module):
 
             # add sampling here
             action, logprob = sample_actions(output.logits, samples=2)
-            action = action[-1]
+            # action = action[-1]
             logprob = logprob[-1]
             select_tokens = torch.where(
-                action[:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
+                action[-1][:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
             )
 
             # expand tokens

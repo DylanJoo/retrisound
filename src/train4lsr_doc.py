@@ -19,10 +19,25 @@ def main():
     from modeling.encoder import SparseEncoder, SparseEncoderForTokenClf
     encoder = SparseEncoder.from_pretrained(model_opt.retriever_name_or_path).eval()
     q_encoder = SparseEncoderForTokenClf.from_pretrained(
-        model_opt.retriever_name_or_path,
+        (model_opt.query_encoder_name_or_path or model_opt.retriever_name_or_path),
         add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers
     )
     retriever = SparseAdaptiveRetriever(q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type)
+
+    # [Retriever]
+    # from modeling.biencoders.sparse_doc_crossattn_testing import SparseAdaptiveEncoders
+    # from modeling.base_encoder_new import SparseEncoder
+    # from modeling.base_encoder_testing import SparseEncoder as SparseEncoder_test
+    # encoder = SparseEncoder(model_name_or_path=model_opt.retriever_name_or_path, cross_attention=False).eval()
+    # q_encoder = SparseEncoder_test.from_pretrained(
+    #     model_opt.retriever_name_or_path,
+    #     add_cross_attention=False, is_decoder=False, num_hidden_layers=1
+    # )
+    # retriever = SparseAdaptiveEncoders(
+    #     q_encoder=q_encoder, 
+    #     encoder=encoder, 
+    #     n_candidates=train_opt.n_max_candidates
+    # )
 
     # [Environment: Generator]
     from options import LLMOptions

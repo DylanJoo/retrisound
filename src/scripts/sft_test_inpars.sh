@@ -1,12 +1,12 @@
 #!/bin/sh
-#SBATCH --job-name=5hr.inpars
+#SBATCH --job-name=10hr.inpars
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=05:00:00
+#SBATCH --time=10:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -24,7 +24,6 @@ MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
 MODEL_SIZE=1B
 BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
-# BASE_LLM=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 dataset=inpars-v2/trec-covid
 # dataset=inpars-v2/climate-fever
 # dataset=inpars-v2/scidocs
@@ -38,11 +37,13 @@ accelerate launch \
     --main_process_port 29601 \
     train4lsr_doc.py \
     --retriever_name_or_path $BASE_RET \
+    --query_encoder_name_or_path bert-base-uncased \
     --generator_name_or_path $BASE_LLM \
     --train_file $DATA_DIR/${dataset} \
     --eval_file $DATA_DIR/${dataset/inpars-v2/beir-cellar} \
-    --num_layers 12 \
+    --num_layers 1 \
     --split train \
+    --sample_type random \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
@@ -65,4 +66,4 @@ accelerate launch \
     --eval_steps 50 \
     --fp16 \
     --index_dir ${INDEX_DIR}/${dataset/inpars-v2/beir-cellar}.lucene_doc \
-    --logging_steps 1 --run_name ${dataset}
+    --logging_steps 1 --run_name ${dataset}:random:TC1+RL1

@@ -5,6 +5,7 @@ from typing import Optional, Union, Tuple, Literal
 @dataclass
 class ModelOptions:
     retriever_name_or_path: Optional[str] = field(default="")
+    query_encoder_name_or_path: Optional[str] = field(default="")
     generator_name_or_path: Optional[str] = field(default=None)
     index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
