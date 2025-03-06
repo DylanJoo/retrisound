@@ -1,12 +1,12 @@
 #!/bin/sh
-#SBATCH --job-name=10hr.litsearch
+#SBATCH --job-name=5hr.litsearch
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=10:00:00
+#SBATCH --time=5:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -32,8 +32,8 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
-    --main_process_port 29603 \
-    train4lsr_doc.py \
+    --main_process_port 29600 \
+    train4lsr_doc_ir.py \
     --retriever_name_or_path $BASE_RET \
     --query_encoder_name_or_path bert-base-uncased \
     --generator_name_or_path $BASE_LLM \
@@ -55,13 +55,14 @@ accelerate launch \
     --generation_batch 4 \
     --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
     --num_steps 3 --n_max_segments 15 \
-    --ct_coef 0.0 \
-    --tc_coef 1.0 \
-    --rl_coef 1.0 \
+    --ct_coef 1.0 \
+    --tc_coef 0.0 \
+    --rl_coef 0.0 \
     --do_train \
     --do_eval \
     --eval_strategy steps \
     --eval_steps 50 \
     --fp16 \
     --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.litsearch.abstracts.lucene \
-    --logging_steps 1 --run_name 'litsearch:random:TC1+RL1'
+    --logging_steps 1 --run_name 'litsearch:random:RL1'
+

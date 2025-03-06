@@ -2,25 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
-from modeling.biencoders.utils import make_labels, transform_weights_to_vector, sample_actions
-# from modeling.biencoders.utils import sample_actions
-
-# def make_labels(d_tokens, candidate_tokens, candidate_masks, q_tokens=None):
-#     binary_matrix = torch.zeros_like(candidate_tokens)
-#     for i in range(len(d_tokens)):
-#         binary_matrix[i] = (candidate_tokens[i].unsqueeze(1) == d_tokens[i]).any(dim=1)
-#         if q_tokens is not None:
-#             binary_matrix[i] += (candidate_tokens[i].unsqueeze(1) == q_tokens[i]).any(dim=1)
-#
-#     # mask unused token
-#     mask_matrix = torch.full_like(binary_matrix, -100)
-#     binary_matrix = torch.where(candidate_masks==0, mask_matrix, binary_matrix)
-#     return binary_matrix.to(candidate_tokens.device)
-#
-# def transform_weights_to_vector(inputs, weights, vocab_size):
-#     vector = torch.zeros(inputs.size(0), vocab_size, dtype=weights.dtype).to(inputs.device)
-#     vector = vector.scatter(1, inputs, weights)
-#     return vector
+from modeling.biencoders.utils import (
+    make_labels, transform_weights_to_vector, sample_actions, transform_ids_to_vector
+)
 
 class SparseAdaptiveRetriever(nn.Module):
     def __init__(
@@ -33,6 +17,7 @@ class SparseAdaptiveRetriever(nn.Module):
         self.q_encoder = q_encoder
         self.encoder = (encoder or q_encoder)
         self.config = q_encoder.config
+        self.num_samples = kwargs.get('num_samples')
 
         if kwargs.get('sample_type') == 'deterministic':
             self.selected_sample = 0
@@ -55,15 +40,18 @@ class SparseAdaptiveRetriever(nn.Module):
         step=0,
         **kwargs
     ):
-        q_reps, d_reps = None, []
+        d_reps = []
         loss_tc, loss_ct, loss_mr = None, None, None
         pos_ratio_truth = 0 
         pos_ratio = 0
-        logprob = None
+        # logprob = None
+        sampled_reps = []
+        logprobs = []
+        tokenizer = kwargs.get('tokenizer')
 
         if (step == 0) and (prev_output is None):
             prev_output = output = self.encoder(q_tokens, q_masks)
-            reps = q_tokens
+            rep = transform_ids_to_vector(q_tokens, tokenizer, count=True)
         else:
             output = self.q_encoder(
                 input_ids=f_tokens,
@@ -75,15 +63,18 @@ class SparseAdaptiveRetriever(nn.Module):
             candidate_masks = f_masks
 
             # add sampling here
-            actions, logprobs = sample_actions(output.logits, samples=30)
-            action = actions[-1]
-            logprob = logprobs[-1]
-            select_tokens = torch.where(
-                action[:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
-            )
+            actions, logprobs = sample_actions(output.logits, samples=self.num_samples)
+
+            for action, logprob in zip(actions, logprobs):
+                select_tokens = torch.where(
+                    action[:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
+                )
+                rep = transform_ids_to_vector(
+                    select_tokens, tokenizer, count=True
+                )
+                sampled_reps.append(rep)
 
             # expand tokens
-            reps = select_tokens
             batch_size, seq_size, _ = output.logits.shape
             CELoss = nn.CrossEntropyLoss()
 
@@ -114,7 +105,8 @@ class SparseAdaptiveRetriever(nn.Module):
                 loss_ct = CELoss(scores_t, labels_ct)
 
         return SparseAdaptiveEncoderOutput(
-            reps=reps,
+            reps=sampled_reps[self.selected_sample] if step > 0 else rep,
+            logprobs=logprobs[self.selected_sample] if step > 0 else None,
             prev_out=output,
             d_reps=d_reps,
             loss_ct=loss_ct,
@@ -122,7 +114,7 @@ class SparseAdaptiveRetriever(nn.Module):
             loss_flop=torch.tensor([0.0]),
             loss_tc=loss_tc,
             logs={'InfoNCE': loss_ct, 'PosRatioTruth': pos_ratio_truth, 'PosRatio': pos_ratio},
-            logprobs=logprob,
+            samples={"logprobs": logprobs, "reps": sampled_reps},
             logits=output.logits,
         )
 

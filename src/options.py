@@ -55,6 +55,7 @@ class ReinforceOptions(TrainingArguments):
     rl_coef: Optional[float] = field(default=1.0)
     reg_coef: Optional[float] = field(default=1.0)
     sample_type: Optional[str] = field(default='deterministic')
+    num_samples: Optional[int] = field(default=3)
     quick_test: Optional[int] = field(default=None)
 
 @dataclass

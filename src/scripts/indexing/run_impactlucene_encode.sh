@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=64G
 #SBATCH --nodes=1
-#SBATCH --array=1-3%1
+#SBATCH --array=1-1%1
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 
@@ -49,7 +49,7 @@ python3 -m retrieval.mlm_encode \
     --model_name_or_path ${RETRIEVER} \
     --tokenizer_name ${RETRIEVER} \
     --collection /home/dju/datasets/${each}/corpus.jsonl \
-    --collection_output /home/dju/indexes/${each}/encoded/vectors_doc.${each##*\jsonl}.jsonl \
+    --collection_output /home/dju/indexes/${each}/encoded/vectors_doc.${each##*/}.jsonl \
     --batch_size 384 \
     --max_length 256 \
     --quantization_factor 100

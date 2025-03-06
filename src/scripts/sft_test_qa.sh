@@ -2,7 +2,7 @@
 #SBATCH --job-name=5hr.qa
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
@@ -33,14 +33,18 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
     --main_process_port 29600 \
-    train4lsr_doc.py \
+    train4lsr_doc_qa.py \
     --retriever_name_or_path $BASE_RET \
+    --query_encoder_name_or_path bert-base-uncased \
     --generator_name_or_path $BASE_LLM \
     --train_file $DATA_DIR/${dataset} \
+    --num_layers 1 \
     --split train \
+    --sample_type random \
+    --num_samples 30 \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 1e-3 \
+    --learning_rate 1e-4 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
@@ -48,12 +52,12 @@ accelerate launch \
     --output_dir ${MODEL_DIR}/adarag_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 4 \
-    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 10 \
+    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
     --num_steps 3 --n_max_segments 15 \
     --ct_coef 0.0 \
     --tc_coef 1.0 \
     --rl_coef 1.0 \
     --do_train \
     --fp16 \
-    --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.litsearch.abstracts.lucene \
-    --logging_steps 1 --run_name 'MLP(q, f)-(TC+RL)-q_encoder1 normal'
+    --index_dir ${INDEX_DIR}/wikipedia_split_dpr/splade-v3-doc.lucene \
+    --logging_steps 1 --run_name 'asqa:random:TC1+RL1'

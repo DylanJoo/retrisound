@@ -22,9 +22,6 @@ class SparseEncoderForTokenClf(BertForTokenClassification):
         output_attentions=None,
         output_hidden_states=None,
     ):
-        """ [Adjustment]
-        - position_ids: should be newly clone when you are going to freeze them. 
-        """
 
         position_ids = self.bert.embeddings.position_ids[:, 0 : input_ids.size(1) + 0].clone()
         outputs = self.bert(

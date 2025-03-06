@@ -44,25 +44,9 @@ from utils import (
 from tools.annealing import Annealer
 from modeling.llm.utils import remove_citations, replace_tags
 
-def transform_ids_to_vector(inputs, tokenizer, count=False):
-    vector = torch.zeros(inputs.size(0), tokenizer.vocab_size).to(inputs.device)
-    if count:
-        vector = vector.scatter_add(1, inputs, torch.ones_like(inputs, dtype=vector.dtype))
-    else:
-        vector = vector.scatter(1, inputs, 1)
-
-    # clean the added tokens
-    for tok, idx in tokenizer.get_added_vocab().items():
-        vector[:, idx] = 0
-    return vector
-
 class PolicyTrainer(Trainer):
 
     def __init__(self, generator, searcher=None, index_dir=None, **kwargs):
-        """ 
-        generator: a vllm wrapper model.
-        searcher: a pyserini seracher.
-        """
         super().__init__(**kwargs)
         self.generator = generator
         self.searcher = searcher
@@ -71,13 +55,6 @@ class PolicyTrainer(Trainer):
 
     @staticmethod
     def measure_ranking(pids_pred, pids_truth):
-        qrel = {"dummy": pids_truth}
-        run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
-        result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[nDCG@10]
-        return result
-
-    @staticmethod
-    def measure_generation(pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
         run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
         result = ir_measures.calc_aggregate([nDCG@10, R@10], qrel, run)[nDCG@10]
@@ -156,7 +133,6 @@ class PolicyTrainer(Trainer):
         reps = []
         logprobs = []
         ct_losses = 0
-        reg_losses = 0
         tc_losses = 0
         rewards = []
         pos_ratio_truth = []
@@ -168,10 +144,8 @@ class PolicyTrainer(Trainer):
                 output = model(
                     q_tokens=retriever_inputs['q_tokens'][0],
                     q_masks=retriever_inputs['q_masks'][0],
-                    step=0
-                )
-                output.reps = transform_ids_to_vector(
-                    output.reps, self.tokenizer, count=True
+                    step=0,
+                    tokenizer=self.tokenizer
                 )
                 reward_0, candidates = self.compute_loss_reward(
                     output.reps, questions, truth=qrels
@@ -195,25 +169,20 @@ class PolicyTrainer(Trainer):
                     prev_output=q_out,
                     sub_token_type_ids=retriever_inputs['q_types'][t],
                     step=t,
+                    tokenizer=self.tokenizer
                 )
-                output.reps = transform_ids_to_vector(
-                    output.reps, self.tokenizer, count=True
-                )
-                reward, candidates = self.compute_loss_reward(
-                    output.reps, questions, truth=qrels
-                )
+                for rep, logprob in zip(output.samples['reps'], output.samples['logprobs']):
+                    reward, candidates = self.compute_loss_reward(rep, questions, truth=qrels)
+                    rewards.append(reward.detach().cpu())
+                    logprobs.append(logprob)
+
                 feedback = self.compute_loss_feedback(questions, candidates)
 
                 ct_losses += output.loss_ct 
-                reg_losses += output.loss_flop 
                 tc_losses += output.loss_tc
 
-                rewards.append(reward)
                 pos_ratio_truth.append(output.logs['PosRatioTruth'])
                 pos_ratio.append(output.logs['PosRatio'])
-
-                # reinforcement
-                logprobs.append(output.logprobs) # B L 2
 
             reps.append(output.reps)
 
@@ -225,38 +194,29 @@ class PolicyTrainer(Trainer):
         pos_ratio = torch.stack(pos_ratio, 0)
         logprobs = torch.stack(logprobs, 0)
         rewards = torch.stack(rewards, 0).to(logprobs.device)
-        # baseline_rewards = torch.cat(
-        #     (torch.zeros(rewards.size(0), 1).to(rewards.device), rewards[:, :-1]), axis=-1
-        # )
 
         # ignore after the reaching the optimal reward 
-        # if self.args.rl_coef == -1:
-        #     rl_coef = self.annealer(1.0)
-        #     tc_coef = 1 - rl_coef
-        # else:
-        #     rl_coef = self.args.rl_coef
+        if self.args.rl_coef == -1:
+            rl_coef = self.annealer(1.0)
+            tc_coef = 1 - rl_coef
+            self.annealer.step()
+        else:
+            tc_coef = self.args.tc_coef
+            rl_coef = self.args.rl_coef
 
-        contrastive_loss = ct_losses
-        token_classification_loss = tc_losses
-        regularization_loss = reg_losses
-        reinforce_loss = (rewards * (-logprobs)).mean()
+        rl_losses = (rewards * (-logprobs)).mean()
 
-        tc_coef = self.args.tc_coef
-        ct_coef = self.args.ct_coef
-        rl_coef = self.args.rl_coef
-
-        # self.annealer.step()
-
-        loss = (token_classification_loss * tc_coef) + (reinforce_loss * rl_coef) + (contrastive_loss * ct_coef) 
+        loss = (tc_losses * tc_coef) + \
+               (rl_losses * rl_coef) + \
+               (ct_losses * self.args.ct_coef) 
 
         self.log({"train/reward_0": reward_0.mean().item()})
         self.log({"train/reward": rewards.mean().item()})
         self.log({"train/pos_ratio_truth": pos_ratio_truth.mean().item()})
         self.log({"train/pos_ratio": pos_ratio.mean().item()})
-        self.log({"loss/RL": reinforce_loss.mean().item()})
-        self.log({"loss/CT": contrastive_loss.mean().item()})
-        self.log({"loss/TC": token_classification_loss.mean().item()})
-        self.log({"loss/REG": regularization_loss.mean().item()})
+        self.log({"loss/RL": rl_losses.mean().item()})
+        self.log({"loss/CT": ct_losses.mean().item()})
+        self.log({"loss/TC": tc_losses.mean().item()})
         self.log({"loss/MR": 0})
 
         print('---')
@@ -360,7 +320,6 @@ class PolicyTrainer(Trainer):
                 
         # Initialize metrics for this batch
         ct_losses = 0
-        reg_losses = 0
         tc_losses = 0
         logs = []
         logprobs = []
@@ -382,9 +341,7 @@ class PolicyTrainer(Trainer):
                         q_tokens=retriever_inputs['q_tokens'][0],
                         q_masks=retriever_inputs['q_masks'][0],
                         step=0,
-                    )
-                    output.reps = transform_ids_to_vector(
-                        output.reps, self.tokenizer, count=True
+                        tokenizer=self.tokenizer
                     )
                     reward_0, candidates = self.compute_loss_reward(
                         output.reps, questions, truth=qrels
@@ -410,9 +367,7 @@ class PolicyTrainer(Trainer):
                         prev_output=output,
                         sub_token_type_ids=retriever_inputs['q_types'][t],
                         step=t,
-                    )
-                    output.reps = transform_ids_to_vector(
-                        output.reps, self.tokenizer, count=True
+                        tokenizer=self.tokenizer
                     )
                     reward, candidates = self.compute_loss_reward(
                         output.reps, questions, truth=qrels
@@ -420,7 +375,6 @@ class PolicyTrainer(Trainer):
                     feedback = self.compute_loss_feedback(questions, candidates)
                 
                     ct_losses += output.loss_ct
-                    reg_losses += output.loss_flop
                     tc_losses += output.loss_tc
                 
                     rewards.append(reward.detach().cpu())

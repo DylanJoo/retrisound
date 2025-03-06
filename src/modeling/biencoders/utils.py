@@ -23,14 +23,22 @@ def sample_actions(logits, samples=1, attention_mask=None):
     m = torch.distributions.one_hot_categorical.OneHotCategorical(probs)
 
     for i in range(samples):
-        if i == 0:
+        if i == 0: # deterministic
             action = torch.zeros_like(logits).scatter_(2, logits.argmax(-1).unsqueeze(-1), 1.)
             action = action.type(logits.dtype)
-        else:
+        else: # sampled
             action = m.sample()
-        actions.append(action)
-        logprob = m.log_prob(action).mean(-1)
+
+        if attention_mask is not None:
+            action = action * attention_mask
+            seq_logprob = m.log_prob(action)
+            seq_logprob = seq_logprob * attention_mask
+            logprob = seq_logprob.sum(-1) / attention_mask.sum(-1)
+        else:
+            logprob = m.log_prob(action).mean(-1)
+
         logprobs.append(logprob)
+        actions.append(action)
 
     return actions, logprobs
 
@@ -42,7 +50,6 @@ def transform_ids_to_vector(inputs, tokenizer=None, count=False):
         vector = vector.scatter(1, inputs, 1)
 
     # clean the added tokens
-    if tokenzier is not None:
-        for tok, idx in tokenizer.get_added_vocab().items():
-            vector[:, idx] = 0
+    for tok, idx in tokenizer.get_added_vocab().items():
+        vector[:, idx] = 0
     return vector

@@ -74,15 +74,6 @@ class PRFDataset(Dataset):
             self.feedbacks[idx][n] = fbk 
             self.n_feedbacks[idx] += 1
 
-    def get_random_crop(self):
-        crops = {}
-        for id, passage in self.corpus.items():
-            passage = passage['text'].split('. ')
-            random.shuffle(passage)
-            n = 1 + len(passage) // 2
-            crops[id] = ". ".join(passage[:n])
-        return crops
-
     def __getitem__(self, idx):
         id = self.ids[idx]
 
@@ -111,6 +102,16 @@ class PRFDataset(Dataset):
                 'feedbacks': self.feedbacks[idx],
                 'n_feedbacks': n, 
                 'contexts': [positive] + negatives }
+
+    # [TODO] make it for unsueprvised learning
+    # def get_random_crop(self):
+    #     crops = {}
+    #     for id, passage in self.corpus.items():
+    #         passage = passage['text'].split('. ')
+    #         random.shuffle(passage)
+    #         n = 1 + len(passage) // 2
+    #         crops[id] = ". ".join(passage[:n])
+    #     return crops
 
 
 @dataclass

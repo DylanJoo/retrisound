@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# coding=utf-8
 import os
 import json
 from dataclasses import asdict
@@ -39,7 +41,7 @@ def main():
     searcher = load_searcher(model_opt.index_dir, lexical=True)
 
     # [data]
-    from data.beir_cellar import PRFDataset, PRFCollator
+    from data import PRFDataset, PRFCollator
     train_dataset = PRFDataset(
         dataset_dir=data_opt.train_file, 
         split=data_opt.split,
@@ -63,7 +65,7 @@ def main():
     # [trainer]
     os.environ["WANDB_PROJECT"] = train_opt.wandb_project
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from trainer import PolicyTrainer
+    from trainer_ir import PolicyTrainer
     trainer = PolicyTrainer(
         args=train_opt,
         model=retriever,

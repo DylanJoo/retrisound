@@ -125,7 +125,7 @@ if __name__ == '__main__':
                 item['title'] = ''
             collection.append(item)
 
-            if len(collection) >= 1000000:
+            if len(collection) >= args.n_docs_per_shard:
                 dataset = Dataset.from_list(collection)
                 print(dataset)
                 batch_inference(args, dataset, i)
@@ -136,4 +136,5 @@ if __name__ == '__main__':
     # finish the rest of collections
     if len(collection) > 0:
         dataset = Dataset.from_list(collection)
+        print(dataset)
         batch_inference(args, dataset, i)
