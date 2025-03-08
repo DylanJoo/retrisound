@@ -34,21 +34,6 @@ def update_tokenizer(tokenizer, pad_token='[PAD]'):
 
     return tokenizer
 
-def augmentation_feedback(
-    questions, 
-    candidates, 
-    n_context, 
-):
-    # prepare prompts
-    prompts = []
-
-    for i in range(len(questions)):
-        D = apply_docs_prompt(candidates[i][:n_context], field='text')
-        prompt = apply_fbk_inst_prompt(Q=questions[i], D=D)
-        prompts.append(prompt)
-
-    return prompts
-
 def get_mini_batch_dict(retriever_inputs, mb_inds):
     mb_retriever_inputs = {}
     for key, list_of_item in retriever_inputs.items():

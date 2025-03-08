@@ -17,61 +17,27 @@ def apply_docs_prompt(doc_items, field='text'):
 ### prompts for feedback
 
 #### IR
-def apply_fbk_inst_prompt(Q, D, prefix=None, R=None):
+def apply_fbk_inst_prompt(Q, D, prefix=None):
     prompt = \
         "Write a passage that answers the given query. Use the provided search results to draft the answer " + \
         "(some of the search results might be irrelevant). Cite the search results if they are relevant. " + \
         "Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
-
-    if R is None:
-        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage:\n"
-        p = template.replace('{prompt}', prompt_0)
-    else:
-        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nDraft: {R}\nNew Query:\n"
-        p = template.replace('{prompt}', prompt_1).replace('{R}', R)
-    p = p.replace("{Q}", Q).replace("{D}", D)
-    return p
-
-#### Follow-up query
-def apply_followup_inst_prompt(Q, D, prefix=None):
-    prompt = \
-        "Answer the following question. The question requires mulitple documents to answer. " + \
-        "Identify the missing information in the search results and write a follow-up query for searching that missing information. "
-    template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nFollow-up Query:"
+    template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage: <p>"
     p = template.replace('{prompt}', prompt)
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
 
-#### Ambiguous query
-def apply_asqa_inst_prompt(Q, D, prefix=None):
+#### Query-decompose
+def apply_break_inst_prompt(Q, D, prefix=None):
     prompt = \
-        "Answer the following question. The question may be ambiguous and have multiple correct answers, " +\
-        "and in that case, you have to provide a long-form answer including all correct answers. " + \
-        "Cite the search results if they can support the answer."
-    template = "{prompt}\n\nQuestion: {Q}\nSearch results:\n{D}\nAnswer:"
+        "Based on the search results, break down the query into multiple sub-queries. " + \
+        "Each sub-queries needs to cover the important points about the query, "+ \
+        "allowing to make the following report based on these points. " + \
+        "List more sub-queries if the original query is vague or ambiguous."
+    template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nSub-queries:"
     p = template.replace('{prompt}', prompt)
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
-
-#### Report generatio
-def apply_report_inst_prompt(Q, D=None, R=None, prefix=None):
-    prompt_0 = \
-        "Write a passage that answers the given query. Use the provided search results to draft the answer " + \
-        "(some of the search results might be irrelevant). " + \
-        "Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
-    prompt_1 = \
-        "Given a query and the draft. Refine the draft if the provided search results can fix incorrect information in it. " + \
-        "(some of the search results might be irrelevant). " + \
-        "Rewrite a new passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
-    if R is None:
-        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage: <p>"
-        p = template.replace('{prompt}', prompt_0)
-    else:
-        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nDraft: {R}\nPassage: <p>"
-        p = template.replace('{prompt}', prompt_1).replace('{R}', R)
-    p = p.replace("{Q}", Q).replace("{D}", D)
-    return p
-
 
 ### prompts for thinking models
 # prompt_report_gen = "Write a passage that answers the given query: {Q}. Use your remembered documents and identify the relevant information to draft the passage. Write the passage within 100 words."

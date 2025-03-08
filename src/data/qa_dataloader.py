@@ -5,6 +5,7 @@ import os
 from tqdm import tqdm
 from glob import glob
 from data.utils import load_corpus_file, batch_iterator
+from datasets import load_dataset
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -29,22 +30,12 @@ class QADataLoader:
         self.qrels = {} # in QA datasets, qrels mean the short answer 
 
     def load(self, split='train'):
-
         if 'asqa' in self.dataset_dir.lower():
             return self.load_asqa(split)
-
-    def load_asqa(self, split):
-        data_file = os.path.join(self.dataset_dir, "ASQA.json")
-        raw_data = json.load(open(data_file, 'r'))[split]
-
-        for id in raw_data:
-            logger.info("Loading Questions and Answers...")
-            self.questions[id] = raw_data[id]['ambiguous_question']
-            self.answers[id] = {"text": raw_data[id]['annotations'][0]['long_answer'], "title": ""}
-            self.qrels[id] = [pair['short_answers'] for pair in raw_data[id]['qa_pairs']]
-
-        self._load_corpus(self.corpus_path)
-        return self.corpus, self.questions, self.answers
+        if '2WikiMultiHop'.lower() in self.dataset_dir.lower():
+            return self.load_2wikimultihop(split)
+        else:
+            raise NotImplementedError
 
     def _load_corpus(self, path):
         if not os.path.isdir(path):
@@ -61,6 +52,32 @@ class QADataLoader:
                     for docid, docdict in corpus.items():
                         self.corpus[docid] = docdict
                 del corpora
+
+    def load_asqa(self, split):
+        data_file = os.path.join(self.dataset_dir, "ASQA.json")
+        raw_data = json.load(open(data_file, 'r'))[split]
+
+        for id in raw_data:
+            logger.info("Loading Questions and Answers...")
+            self.questions[id] = raw_data[id]['ambiguous_question']
+            self.answers[id] = {"text": raw_data[id]['annotations'][0]['long_answer'], "title": ""}
+            self.qrels[id] = [pair['short_answers'] for pair in raw_data[id]['qa_pairs']]
+
+        self._load_corpus(self.corpus_path)
+        return self.corpus, self.questions, self.answers
+
+    def load_2wikimultihop(self, split):
+        data = load_dataset('xanhho/2WikiMultihopQA', split=split)
+
+        for i, id in enumerate(data['_id']):
+            logger.info("Loading Questions and Answers...")
+            self.questions[id] = data[i]['question']
+            self.qrels[id] = [title for title in data[i]['supporting_facts']['title']]
+            self.answers[id] = {"text": data[i]['answer'], "title": " ".join(self.qrels[id])}
+
+        self._load_corpus(self.corpus_path)
+        return self.corpus, self.questions, self.answers
+
 
     # def _load_runs(self, file, negative_threshold=50):
     #     with open(file, 'r') as f:

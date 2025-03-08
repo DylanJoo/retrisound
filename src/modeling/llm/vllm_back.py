@@ -5,7 +5,7 @@ class LLM:
 
     def __init__(self, 
         model, 
-        temperature=0.7, top_p=0.9, 
+        temperature=0.7, top_p=1.0, 
         dtype='half', gpu_memory_utilization=0.75, 
         num_gpus=1, 
         think_activated=False,
@@ -16,7 +16,9 @@ class LLM:
             dtype=dtype,
             enforce_eager=True,
             tensor_parallel_size=num_gpus,
-            max_model_len=kwargs.get('max_model_len', 10240),
+            max_num_batched_tokens=kwargs.get('max_num_batched_tokens', 10240),
+            max_model_len=kwargs.get('max_model_len', 20480),
+            enable_chunked_prefill=True,
             gpu_memory_utilization=gpu_memory_utilization
         )
         self.sampling_params = vllm.SamplingParams(

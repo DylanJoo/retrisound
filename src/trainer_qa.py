@@ -18,7 +18,6 @@ import os
 import re
 import time
 import json
-import datetime
 #
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Union, Any
@@ -36,14 +35,21 @@ import safetensors.torch
 from peft import PeftModel
 from transformers.modeling_utils import PreTrainedModel
 from transformers import Trainer
-import ir_measures
-from ir_measures import nDCG, R
-from utils import (
-    augmentation_feedback,
-    load_searcher
-)
+from utils import load_searcher
 from tools.annealing import Annealer
+# from tools.metrics import *
 from modeling.llm.utils import remove_citations, replace_tags
+from prompts.generic import apply_docs_prompt, apply_report_inst_prompt
+
+def augmentation_feedback(questions, candidates, n_context, R=None):
+    if R is None:
+        R = [None] * len(questions)
+    prompts = []
+    for i in range(len(questions)):
+        D = apply_docs_prompt(candidates[i][:n_context], field='text')
+        prompt = apply_report_inst_prompt(Q=questions[i], D=D, R=R[i])
+        prompts.append(prompt)
+    return prompts
 
 class PolicyTrainer(Trainer):
 
@@ -56,7 +62,7 @@ class PolicyTrainer(Trainer):
 
     @staticmethod
     def measure_generation(retrieved_list, answer_list):
-        retrieved_list = [r['title'] + " " + r['text'] for r in retrieved_list]
+        retrieved_list = [(r['title'] + " " + r['text']).strip() for r in retrieved_list]
         all_text = (" ".join(retrieved_list)).lower()
         answer_list = [ans.lower() for ans in answer_list]
         n_short_answers = len(answer_list)
@@ -67,7 +73,7 @@ class PolicyTrainer(Trainer):
         self, 
         query, 
         questions,
-        truth=None, # list of short answers
+        truth=None,
     ):
         gen_batch = (self.args.generation_batch or 1)
 
@@ -97,7 +103,7 @@ class PolicyTrainer(Trainer):
         rewards = torch.tensor(rewards)
         return rewards, candidates
 
-    def compute_loss_feedback(self, questions, contexts):
+    def compute_loss_feedback(self, questions, contexts, feedbacks=None):
 
         gen_batch = (self.args.generation_batch or 1)
 
@@ -105,6 +111,7 @@ class PolicyTrainer(Trainer):
             questions=questions, 
             candidates=contexts, 
             n_context=self.args.n_contexts,
+            R=feedbacks
         )
         feedback = []
         for i in range(0, len(prompt), gen_batch):
@@ -179,7 +186,7 @@ class PolicyTrainer(Trainer):
                     rewards.append(reward.detach().cpu())
                     logprobs.append(logprob)
 
-                feedback = self.compute_loss_feedback(questions, candidates)
+                feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
 
                 ct_losses += output.loss_ct 
                 tc_losses += output.loss_tc

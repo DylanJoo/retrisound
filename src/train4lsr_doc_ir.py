@@ -24,7 +24,10 @@ def main():
         (model_opt.query_encoder_name_or_path or model_opt.retriever_name_or_path),
         add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers
     )
-    retriever = SparseAdaptiveRetriever(q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type)
+    retriever = SparseAdaptiveRetriever(
+        q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type,
+        num_samples=train_opt.num_samples
+    )
 
     # [Environment: Generator]
     from options import LLMOptions
@@ -34,7 +37,10 @@ def main():
     if model_opt.generator_name_or_path is None:
         generator = dummyLLM()
     else:
-        generator = LLM(model=model_opt.generator_name_or_path, temperature=0.7)
+        generator = LLM(
+            model=model_opt.generator_name_or_path, temperature=0.7,
+            max_num_batched_tokens=20480, max_model_length=30000
+        )
 
     # [Environment: Searcher]
     from utils import load_searcher

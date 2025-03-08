@@ -17,7 +17,8 @@ from transformers.tokenization_utils_base import (
 import sys
 import csv
 
-from beir.datasets.data_loader import GenericDataLoader
+# from beir.datasets.data_loader import GenericDataLoader
+from data.ir_dataloader import IRDataLoader
 
 class PRFDataset(Dataset):
     def __init__(
@@ -34,25 +35,30 @@ class PRFDataset(Dataset):
         if ('nq' in dataset_dir) and (split == 'train'):
             dataset_dir = dataset_dir.replace('nq', 'nq-train')
 
-        corpus, self.queries, self.qrels = GenericDataLoader(data_folder=dataset_dir).load(split=split)
+        corpus, self.queries, self.qrels = IRDataLoader(data_folder=dataset_dir).load(split=split)
         self.dataset_dir = dataset_dir
         self.corpus = corpus
         self.split = split
 
-        if split != 'test':
-            self.length = len(self.queries)
-            self.ids = list(self.queries.keys())
-            self.corpus_ids = list(self.corpus.keys())
-        else:
-            max_qrels = random.sample(self.qrels.keys(), len(self.qrels))[:max_examples]
-            self.qrels = {k: self.qrels[k] for k in max_qrels}
-            self.length = len(self.qrels)
-            self.ids = list(self.qrels.keys())
-            judged_docids = []
-            for qid in self.qrels:
-                judged_docids += [docid for docid in self.qrels[qid]]
-            self.corpus = {id: passage for id, passage in self.corpus.items() if id in judged_docids}
-            self.corpus_ids = list(self.corpus.keys())
+        # remove qrels without positive
+        for qid in self.qrels:
+            scores = list(self.qrels[qid].values())
+            if not any([int(score) >= 1 for score in scores]):
+                del self.queries[qid]
+        self.length = len(self.queries)
+        self.ids = list(self.queries.keys())
+        self.corpus_ids = list(self.corpus.keys())
+
+        # else:
+        #     max_qrels = random.sample(self.qrels.keys(), len(self.qrels))[:max_examples]
+        #     self.qrels = {k: self.qrels[k] for k in max_qrels}
+        #     self.length = len(self.qrels)
+        #     self.ids = list(self.qrels.keys())
+        #     judged_docids = []
+        #     for qid in self.qrels:
+        #         judged_docids += [docid for docid in self.qrels[qid]]
+        #     self.corpus = {id: passage for id, passage in self.corpus.items() if id in judged_docids}
+        #     self.corpus_ids = list(self.corpus.keys())
 
         ## training attributes
         self.n_max_segments = n_max_segments

@@ -37,12 +37,22 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers import Trainer
 import ir_measures
 from ir_measures import nDCG, R
-from utils import (
-    augmentation_feedback,
-    load_searcher
-)
+from utils import load_searcher
 from tools.annealing import Annealer
+# from tools.metrics import *
 from modeling.llm.utils import remove_citations, replace_tags
+from prompts.generic import apply_docs_prompt, apply_fbk_inst_prompt, apply_report_inst_prompt
+
+def augmentation_feedback(questions, candidates, n_context, R=None):
+    if R is None:
+        R = [None] * len(questions)
+    prompts = []
+    for i in range(len(questions)):
+        D = apply_docs_prompt(candidates[i][:n_context], field='text')
+        # prompt = apply_fbk_inst_prompt(Q=questions[i], D=D, R=R[i])
+        prompt = apply_report_inst_prompt(Q=questions[i], D=D, R=R[i])
+        prompts.append(prompt)
+    return prompts
 
 class PolicyTrainer(Trainer):
 
@@ -94,7 +104,7 @@ class PolicyTrainer(Trainer):
         rewards = torch.tensor(rewards)
         return rewards, candidates
 
-    def compute_loss_feedback(self, questions, contexts):
+    def compute_loss_feedback(self, questions, contexts, feedbacks=None):
 
         gen_batch = (self.args.generation_batch or 1)
 
@@ -102,11 +112,12 @@ class PolicyTrainer(Trainer):
             questions=questions, 
             candidates=contexts, 
             n_context=self.args.n_contexts,
+            R=feedbacks
         )
         feedback = []
         for i in range(0, len(prompt), gen_batch):
             b_feedback = self.generator.generate(prompt[i:i+gen_batch])
-            b_feedback = [remove_citations(f) for f in b_feedback]
+            # b_feedback = [remove_citations(f) for f in b_feedback]
             b_feedback = [replace_tags(f, 'p') for f in b_feedback]
             feedback += b_feedback
 
@@ -176,7 +187,7 @@ class PolicyTrainer(Trainer):
                     rewards.append(reward.detach().cpu())
                     logprobs.append(logprob)
 
-                feedback = self.compute_loss_feedback(questions, candidates)
+                feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
 
                 ct_losses += output.loss_ct 
                 tc_losses += output.loss_tc
