@@ -116,13 +116,20 @@ if __name__ == '__main__':
         i = 0
         collection = []
         for line in tqdm(f):
-            item = json.loads(line.strip())
-            if 'contents' not in item.keys(): # for beir-cellar
-                if 'id' not in item.keys():
-                    item['id'] = item['_id']
-                item['contents'] = (item.get('title', "") + " " + item['text']).strip()
-            if 'title' not in item.keys():
-                item['title'] = ''
+
+            if 'jsonl' in args.collection:
+                item = json.loads(line.strip())
+                if 'contents' not in item.keys(): # for beir-cellar
+                    if 'id' not in item.keys():
+                        item['id'] = item['_id']
+                    item['contents'] = (item.get('title', "") + " " + item['text']).strip()
+                if 'title' not in item.keys():
+                    item['title'] = ''
+
+            if 'tsv' in args.collection:
+                item_ = line.strip().split('\t', 1)
+                item = {'id': item[0].strip(), "contents": item[1].strip(), "title": ""}
+
             collection.append(item)
 
             if len(collection) >= args.n_docs_per_shard:

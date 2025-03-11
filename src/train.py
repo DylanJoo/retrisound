@@ -17,13 +17,13 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    from modeling.biencoders.query_adapter import SparseAdaptiveRetriever
+    from modeling.biencoders.query_reformulator import SparseAdaptiveRetriever
     from modeling.encoder import SparseEncoder, SparseEncoderForTokenClf
     encoder = SparseEncoder.from_pretrained(model_opt.retriever_name_or_path).eval()
     q_encoder = SparseEncoderForTokenClf.from_pretrained(
         (model_opt.query_encoder_name_or_path or model_opt.retriever_name_or_path),
         add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers,
-        num_labels=2
+        num_labels=1
     )
     retriever = SparseAdaptiveRetriever(
         q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type,
@@ -32,16 +32,10 @@ def main():
 
     # [Environment: Generator]
     from options import LLMOptions
-    from modeling.llm.vllm_back import LLM
+    # from modeling.llm.vllm_back import LLM
     from modeling.llm.hf_back import dummyLLM
     llm_opt = LLMOptions()
-    if model_opt.generator_name_or_path is None:
-        generator = dummyLLM()
-    else:
-        generator = LLM(
-            model=model_opt.generator_name_or_path, temperature=0.7,
-            max_num_batched_tokens=20480, max_model_length=30000
-        )
+    generator = dummyLLM()
 
     # [Environment: Searcher]
     from utils import load_searcher
@@ -56,6 +50,8 @@ def main():
         n_negative_samples=model_opt.n_negative_samples,
         quick_test=train_opt.quick_test,
     )
+    train_dataset.load_prebuilt_feedback()
+
     if train_opt.do_eval:
         eval_dataset = PRFDataset(
             dataset_dir=(data_opt.eval_file or data_opt.train_file),

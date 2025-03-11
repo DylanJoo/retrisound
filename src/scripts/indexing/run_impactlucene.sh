@@ -3,7 +3,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --nodes=1
 #SBATCH --mem=32G
-#SBATCH --array=1-3%1
+#SBATCH --array=1-1%1
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=06:00:00
 #SBATCH --output=%x.%j.out
@@ -16,11 +16,9 @@ cd ~/retrisound/src/
 # Start the experiment.
 # Setups
 RETRIEVER=naver/splade-v3-doc
-MULTIJOBS=/home/dju/temp/beir_multijobs.txt
-MULTIJOBS=/home/dju/temp/wikipedia_split_dpr_multijobs.txt
-MULTIJOBS=/home/dju/temp/neuclir_multijobs.txt
 
 # IR benchmarks
+MULTIJOBS=/home/dju/temp/beir_multijobs.txt
 each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 # echo $each
 # python -m pyserini.index.lucene \
@@ -41,12 +39,22 @@ each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 #   --storeDocvectors --impact --pretokenized
 
 # NeuCLIR
+MULTIJOBS=/home/dju/temp/neuclir_multijobs.txt
 each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
-echo $each
+# echo $each
+# python -m pyserini.index.lucene \
+#     --collection JsonVectorCollection \
+#     --input ${INDEX_DIR}/${each}/encoded \
+#     --index ${INDEX_DIR}/${each}/splade-v3-doc.lucene \
+#     --generator DefaultLuceneDocumentGenerator \
+#     --threads 36 \
+#     --storeDocvectors --impact --pretokenized
+
+# NeuCLIR
 python -m pyserini.index.lucene \
     --collection JsonVectorCollection \
-    --input ${INDEX_DIR}/${each}/encoded \
-    --index ${INDEX_DIR}/${each}/splade-v3-doc.lucene \
+    --input ${INDEX_DIR}/msmarco-passage/encoded \
+    --index ${INDEX_DIR}msmarco-passage/train/splade-v3-doc.lucene \
     --generator DefaultLuceneDocumentGenerator \
     --threads 36 \
     --storeDocvectors --impact --pretokenized

@@ -4,6 +4,7 @@ import csv
 import json
 import logging
 import os
+import ir_datasets
 
 from tqdm.autonotebook import tqdm
 
@@ -25,6 +26,7 @@ class IRDataLoader:
         self.qrels = {}
 
         if prefix:
+            self.prefix = prefix 
             query_file = prefix + "-" + query_file
             qrels_folder = prefix + "-" + qrels_folder
 
@@ -41,28 +43,35 @@ class IRDataLoader:
         if not fIn.endswith(ext):
             raise ValueError(f"File {fIn} must be present with extension {ext}")
 
-    def load_custom(
+    def load_from_ir_datasets(
         self,
     ) -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, int]]]:
-        self.check(fIn=self.corpus_file, ext="jsonl")
-        self.check(fIn=self.query_file, ext="jsonl")
-        self.check(fIn=self.qrels_file, ext="tsv")
+        dataset = ir_datasets.load(self.prefix)
 
-        if not len(self.corpus):
-            logger.info("Loading Corpus...")
-            self._load_corpus()
-            logger.info("Loaded %d Documents.", len(self.corpus))
-            logger.info("Doc Example: %s", list(self.corpus.values())[0])
+        # Corpus
+        logger.info("Loading Corpus...")
+        for doc in dataset.docs_iter():
+            self.corpus[doc.doc_id] = {
+                "text": doc.text,
+                "title": doc.title if hasattr(doc, "title") else "",
+            }
+        logger.info("Loaded %d Documents.", len(self.corpus))
+        logger.info("Doc Example: %s", list(self.corpus.values())[0])
 
-        if not len(self.queries):
-            logger.info("Loading Queries...")
-            self._load_queries()
+        # Queries
+        logger.info("Loading Queries...")
+        for query in dataset.queries_iter():
+            self.queries[query.query_id] = query.text
 
-        if os.path.exists(self.qrels_file):
-            self._load_qrels()
-            self.queries = {qid: self.queries[qid] for qid in self.qrels}
-            logger.info("Loaded %d Queries.", len(self.queries))
-            logger.info("Query Example: %s", list(self.queries.values())[0])
+        # Qrels
+        for qrel in dataset.qrels_iter():
+            if qrel.query_id not in self.qrels:
+                self.qrels[qrel.query_id] = {qrel.doc_id: qrel.relevance}
+            else:
+                self.qrels[qrel.query_id][qrel.doc_id] = qrel.relevance
+
+        logger.info("loaded %d queries.", len(self.queries))
+        logger.info("query example: %s", list(self.queries.values())[0])
 
         return self.corpus, self.queries, self.qrels
 
@@ -85,14 +94,14 @@ class IRDataLoader:
         if os.path.exists(self.qrels_file):
             self._load_qrels()
             self.queries = {qid: self.queries[qid] for qid in self.qrels}
-            logger.info("Loaded %d %s Queries.", len(self.queries), split.upper())
-            logger.info("Query Example: %s", list(self.queries.values())[0])
+            logger.info("loaded %d %s queries.", len(self.queries), split.upper())
+            logger.info("query example: %s", list(self.queries.values())[0])
 
         return self.corpus, self.queries, self.qrels
 
     def load_corpus(self) -> dict[str, dict[str, str]]:
         self.check(fIn=self.corpus_file, ext="jsonl")
-
+        
         if not len(self.corpus):
             logger.info("Loading Corpus...")
             self._load_corpus()
@@ -113,6 +122,7 @@ class IRDataLoader:
                 }
 
     def _load_queries(self):
+
         with open(self.query_file, encoding="utf8") as fIn:
             for line in fIn:
                 line = json.loads(line)

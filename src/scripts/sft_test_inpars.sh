@@ -1,12 +1,12 @@
 #!/bin/sh
-#SBATCH --job-name=10hr.inpars
+#SBATCH --job-name=5hr.inpars
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=10:00:00
+#SBATCH --time=05:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -35,19 +35,20 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
     --main_process_port 29601 \
-    train4lsr_doc.py \
+    train.py \
     --retriever_name_or_path $BASE_RET \
-    --query_encoder_name_or_path bert-base-uncased \
+    --query_encoder_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
     --train_file $DATA_DIR/${dataset} \
     --eval_file $DATA_DIR/${dataset/inpars-v2/beir-cellar} \
-    --num_layers 1 \
+    --num_layers 6 \
+    --num_samples 100 \
     --split train \
     --sample_type random \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 1e-3 \
+    --learning_rate 1e-4 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
@@ -58,7 +59,7 @@ accelerate launch \
     --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
     --num_steps 3 --n_max_segments 15 \
     --ct_coef 0.0 \
-    --tc_coef 1.0 \
+    --tc_coef 0.0 \
     --rl_coef 1.0 \
     --do_train \
     --do_eval \
@@ -66,4 +67,4 @@ accelerate launch \
     --eval_steps 50 \
     --fp16 \
     --index_dir ${INDEX_DIR}/${dataset/inpars-v2/beir-cellar}.lucene_doc \
-    --logging_steps 1 --run_name ${dataset}:random:TC1+RL1
+    --logging_steps 1 --run_name ${dataset}:random:RL1

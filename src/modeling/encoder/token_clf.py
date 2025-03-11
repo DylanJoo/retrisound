@@ -5,8 +5,8 @@ from modeling.outputs import SparseEncoderOutput
 
 class SparseEncoderForTokenClf(BertForTokenClassification):
     def __init__(self, config):
-        config.num_labels = 2
         super().__init__(config)
+        self.num_labels = config.num_labels
 
     def forward(
         self,
@@ -40,6 +40,9 @@ class SparseEncoderForTokenClf(BertForTokenClassification):
         last_hidden_states = outputs[0]
         tok_logits = self.classifier(last_hidden_states)
         nonzero_indices = None
+
+        if self.num_labels == 1:
+            tok_logits = nn.functional.relu(tok_logits)
 
         return SparseEncoderOutput(
             logits=tok_logits, 

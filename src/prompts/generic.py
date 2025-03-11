@@ -19,16 +19,21 @@ def apply_docs_prompt(doc_items, field='text'):
 #### IR
 def apply_fbk_inst_prompt(Q, D, prefix=None, R=None):
     prompt = \
-        "Write a passage that answers the given query. Use the provided search results to draft the answer " + \
+        "Write a passage that answers the given query. {prefix} Use the provided search results to draft the answer " + \
         "(some of the search results might be irrelevant). Cite the search results if they are relevant. " + \
         "Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
 
+    if prefix is not None:
+        prompt = prompt.replace("{prefix}", prefix)
+    else:
+        prompt = prompt.replace("{prefix} ", "")
+
     if R is None:
         template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage:\n"
-        p = template.replace('{prompt}', prompt_0)
+        p = template.replace('{prompt}', prompt)
     else:
         template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nDraft: {R}\nNew Query:\n"
-        p = template.replace('{prompt}', prompt_1).replace('{R}', R)
+        p = template.replace('{prompt}', prompt).replace('{R}', R)
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
 

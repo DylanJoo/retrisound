@@ -1,3 +1,4 @@
+import os
 import random
 import json
 import datetime
@@ -16,7 +17,7 @@ from transformers.tokenization_utils_base import (
 )
 import sys
 import csv
-
+from datasets import load_dataset
 from data.ir_dataloader import IRDataLoader
 
 class PRFDataset(Dataset):
@@ -34,30 +35,27 @@ class PRFDataset(Dataset):
         if ('nq' in dataset_dir) and (split == 'train'):
             dataset_dir = dataset_dir.replace('nq', 'nq-train')
 
-        corpus, self.queries, self.qrels = IRDataLoader(data_folder=dataset_dir).load(split=split)
+        if os.path.exists(dataset_dir):
+            corpus, self.queries, self.qrels = IRDataLoader(data_folder=dataset_dir).load(split=split)
+        else: # load from ir_datasets
+            corpus, self.queries, self.qrels = IRDataLoader(prefix=dataset_dir).load_from_ir_datasets()
+
         self.dataset_dir = dataset_dir
         self.corpus = corpus
         self.split = split
 
-        # remove qrels without positive
+        # remove queries that have only negative qrels
         for qid in self.qrels:
-            scores = list(self.qrels[qid].values())
+            scores = self.qrels.get(qid, [-1])
             if not any([int(score) >= 1 for score in scores]):
                 del self.queries[qid]
+
+        # remove queries that have no qrels
+        self.queries = {k: v for k, v in self.queries.items() if k in self.qrels}
+
         self.length = len(self.queries)
         self.ids = list(self.queries.keys())
         self.corpus_ids = list(self.corpus.keys())
-
-        # else:
-        #     max_qrels = random.sample(self.qrels.keys(), len(self.qrels))[:max_examples]
-        #     self.qrels = {k: self.qrels[k] for k in max_qrels}
-        #     self.length = len(self.qrels)
-        #     self.ids = list(self.qrels.keys())
-        #     judged_docids = []
-        #     for qid in self.qrels:
-        #         judged_docids += [docid for docid in self.qrels[qid]]
-        #     self.corpus = {id: passage for id, passage in self.corpus.items() if id in judged_docids}
-        #     self.corpus_ids = list(self.corpus.keys())
 
         ## training attributes
         self.n_max_segments = n_max_segments
@@ -66,6 +64,30 @@ class PRFDataset(Dataset):
         ## dynamic attributes
         self.n_feedbacks = [0] * self.length
         self.feedbacks = [["" for _ in range(self.n_max_segments)] for _ in range(self.length)]
+
+    def load_prebuilt_feedback(self, feedback_file='feedbacks.jsonl'):
+        if os.path.exists(self.dataset_dir):
+            feedbacks = load_dataset('json', data_files=os.path.join(self.dataset_dir, feedback_file))
+            feedbacks = {data['id']: data['text'] for data in feedbacks}
+        elif 'msmarco-passage' in self.dataset_dir:
+            feedbacks = load_dataset('intfloat/query2doc_msmarco', split='train')
+            feedbacks = {data['query_id']: data['pseudo_doc'] for data in feedbacks}
+        elif 'trec-dl-2019' in self.dataset_dir:
+            feedbacks = load_dataset('intfloat/query2doc_msmarco', split='trec_dl2019')
+            feedbacks = {data['query_id']: data['pseudo_doc'] for data in feedbacks}
+        elif 'trec-dl-2020' in self.dataset_dir:
+            feedbacks = load_dataset('intfloat/query2doc_msmarco', split='trec_dl2020')
+            feedbacks = {data['query_id']: data['pseudo_doc'] for data in feedbacks}
+
+        for idx, qid in enumerate(self.ids):
+            try:
+                feedback = feedbacks.pop(qid, None)
+            except:
+                judged_positive_ids = [pid for pid, score in self.qrels[idx].items() if int(score) >= 1]
+                positive_ids = random.sample(judged_positive_ids, 1)
+                feedback = self.corpus[positive_ids[0]] if len(positive_ids) > 0 else ""
+
+            self.feedbacks[idx][0] = feedback
 
     def __len__(self):
         return self.length
@@ -107,17 +129,6 @@ class PRFDataset(Dataset):
                 'feedbacks': self.feedbacks[idx],
                 'n_feedbacks': n, 
                 'contexts': [positive] + negatives }
-
-    # [TODO] make it for unsueprvised learning
-    # def get_random_crop(self):
-    #     crops = {}
-    #     for id, passage in self.corpus.items():
-    #         passage = passage['text'].split('. ')
-    #         random.shuffle(passage)
-    #         n = 1 + len(passage) // 2
-    #         crops[id] = ". ".join(passage[:n])
-    #     return crops
-
 
 @dataclass
 class PRFCollator(DefaultDataCollator):

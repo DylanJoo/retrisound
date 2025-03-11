@@ -49,8 +49,7 @@ def augmentation_feedback(questions, candidates, n_context, R=None):
     prompts = []
     for i in range(len(questions)):
         D = apply_docs_prompt(candidates[i][:n_context], field='text')
-        # prompt = apply_fbk_inst_prompt(Q=questions[i], D=D, R=R[i])
-        prompt = apply_report_inst_prompt(Q=questions[i], D=D, R=R[i])
+        prompt = apply_report_inst_prompt(Q=questions[i], D=D, R=R[i], prefix="The query is about science.")
         prompts.append(prompt)
     return prompts
 
@@ -62,6 +61,7 @@ class PolicyTrainer(Trainer):
         self.searcher = searcher
         self.rep_type = 'sparse_doc'
         self.annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=True)
+        self.dataset_name = kwargs.pop('dataset_name', 'beir/scifact') 
 
     @staticmethod
     def measure_ranking(pids_pred, pids_truth):
@@ -162,7 +162,8 @@ class PolicyTrainer(Trainer):
                     output.reps, questions, truth=qrels
                 )
 
-                feedback = self.compute_loss_feedback(questions, candidates)
+                # feedback = self.compute_loss_feedback(questions, candidates)
+                feedback = [self.train_dataset.feedbacks[idx][0] for idx in data_indices]
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -187,7 +188,7 @@ class PolicyTrainer(Trainer):
                     rewards.append(reward.detach().cpu())
                     logprobs.append(logprob)
 
-                feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
+                # feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
 
                 ct_losses += output.loss_ct 
                 tc_losses += output.loss_tc
@@ -215,6 +216,10 @@ class PolicyTrainer(Trainer):
             tc_coef = self.args.tc_coef
             rl_coef = self.args.rl_coef
 
+        # print(rewards.shape)
+        # print(logprobs.shape)
+        # print('1', rewards.shape)
+        # print('2', logprobs.shape)
         rl_losses = (rewards * (-logprobs)).mean()
 
         loss = (tc_losses * tc_coef) + \
@@ -383,7 +388,7 @@ class PolicyTrainer(Trainer):
                     reward, candidates = self.compute_loss_reward(
                         output.reps, questions, truth=qrels
                     )
-                    feedback = self.compute_loss_feedback(questions, candidates)
+                    feedback = self.compute_loss_feedback(questions, candidates) 
                 
                     ct_losses += output.loss_ct
                     tc_losses += output.loss_tc
