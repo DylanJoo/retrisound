@@ -16,7 +16,6 @@ from transformers.tokenization_utils_base import (
 )
 import sys
 import csv
-# from .utils import load_corpus_file, batch_iterator 
 from data.qa_dataloader import QADataLoader
 
 class PRFQADataset(Dataset):

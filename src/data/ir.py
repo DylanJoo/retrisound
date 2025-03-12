@@ -46,7 +46,7 @@ class PRFDataset(Dataset):
 
         # remove queries that have only negative qrels
         for qid in self.qrels:
-            scores = self.qrels.get(qid, [-1])
+            scores = [s for docid, s in self.qrels.get(qid, {'dummy': -1}).items()]
             if not any([int(score) >= 1 for score in scores]):
                 del self.queries[qid]
 
@@ -135,7 +135,7 @@ class PRFCollator(DefaultDataCollator):
     tokenizer: Union[PreTrainedTokenizerBase] = None
     truncation: Union[bool, str] = True
     padding: Union[bool, str, PaddingStrategy] = 'longest'
-    max_src_length: Union[int] = 256
+    max_src_length: Union[int] = 512
     pad_to_multiple_of: Optional[int] = None
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
