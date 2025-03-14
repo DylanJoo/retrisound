@@ -35,11 +35,13 @@ import safetensors.torch
 from peft import PeftModel
 from transformers.modeling_utils import PreTrainedModel
 from transformers import Trainer
+import ir_measures
+from ir_measures import nDCG, R, RR
 from utils import load_searcher
 from tools.annealing import Annealer
 # from tools.metrics import *
 from modeling.llm.utils import remove_citations, replace_tags
-from prompts.generic import apply_docs_prompt, apply_report_inst_prompt, apply_mqa_inst_prompt
+from prompts.generic import apply_docs_prompt, apply_fbk_inst_prompt, apply_report_inst_prompt
 
 def augmentation_feedback(questions, candidates, n_context, R=None):
     if R is None:
@@ -47,37 +49,29 @@ def augmentation_feedback(questions, candidates, n_context, R=None):
     prompts = []
     for i in range(len(questions)):
         D = apply_docs_prompt(candidates[i][:n_context], field='text')
-        prompt = apply_mqa_inst_prompt(Q=questions[i], D=D, R=R[i])
+        prompt = apply_report_inst_prompt(Q=questions[i], D=D, R=R[i])
         prompts.append(prompt)
     return prompts
 
 class PolicyTrainer(Trainer):
 
-    def __init__(self, generator, searcher=None, index_dir=None, dataset_name="", **kwargs):
+    def __init__(self, generator, searcher=None, index_dir=None, dataset_name="", num_generation=False, **kwargs):
         super().__init__(**kwargs)
         self.generator = generator
         self.searcher = searcher
         self.rep_type = 'sparse_doc'
         self.annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=True)
         self.dataset_name = dataset_name
+        self.num_generation = num_generation
 
     @staticmethod
-    def measure_generation(retrieved_list, answer_list):
-        retrieved_list = [(r['title'] + " " + r['text']).strip() for r in retrieved_list]
-        all_text = (" ".join(retrieved_list)).lower()
-        answer_list = [ans.lower() for ans in answer_list]
-        n_short_answers = len(answer_list)
-        recall = sum([1 for ans in answer_list if (ans in all_text) ]) / n_short_answers
-        return recall
+    def measure_ranking(pids_pred, pids_truth):
+        qrel = {"dummy": pids_truth}
+        run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
+        result = ir_measures.calc_aggregate([nDCG@10, R@10, RR@10], qrel, run)[nDCG@10] 
+        return result
 
-    def compute_loss_reward(
-        self, 
-        query, 
-        questions,
-        truth=None,
-    ):
-        gen_batch = (self.args.generation_batch or 1)
-
+    def compute_loss_reward(self, query, questions, truth=None):
         hits = self.searcher.batch_search(
             logits=query.clone().float().detach().cpu().numpy(), 
             q_ids=[str(i) for i in range(query.size()[0])],
@@ -93,7 +87,7 @@ class PolicyTrainer(Trainer):
             try: 
                 pids = [h.docid for h in hits[key]]
                 candidate = [self.train_dataset.corpus[h.docid] for h in hits[key]]
-                reward = self.measure_generation(candidate, truth[i])
+                reward = self.measure_ranking(pids, truth[i])
             except: # no retrieved results
                 candidate = []
                 reward = 0.0
@@ -116,7 +110,7 @@ class PolicyTrainer(Trainer):
         )
         feedback = []
         for i in range(0, len(prompt), gen_batch):
-            b_feedback = self.generator.generate(prompt[i:i+gen_batch], max_tokens=512)
+            b_feedback = self.generator.generate(prompt[i:i+gen_batch], max_tokens=256)
             # b_feedback = [remove_citations(f) for f in b_feedback]
             b_feedback = [replace_tags(f, 'p') for f in b_feedback]
             feedback += b_feedback
@@ -136,7 +130,7 @@ class PolicyTrainer(Trainer):
         questions = inputs["query"]
         data_indices = inputs["index"] # for the next iteration
         ids = [self.train_dataset.ids[idx] for idx in data_indices]
-        qrels = [self.train_dataset.answers[id] for id in ids]
+        qrels = [self.train_dataset.qrels[id] for id in ids]
 
         batch_size, step_size = len(questions), self.args.num_steps
 
@@ -162,7 +156,12 @@ class PolicyTrainer(Trainer):
                     output.reps, questions, truth=qrels
                 )
 
-                feedback = self.compute_loss_feedback(questions, candidates)
+                if 'msmarco' in self.dataset_name:
+                    # pre-computed feedback
+                    feedback = [self.train_dataset.feedbacks[idx][0] for idx in data_indices]
+                else:
+                    # online feedback
+                    feedback = self.compute_loss_feedback(questions, candidates)
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -188,7 +187,8 @@ class PolicyTrainer(Trainer):
                     logprobs.append(logprob)
 
                 # ignore the followup feedback  # [TODO] add control for the looping feedback
-                feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
+                if self.num_generation > t:
+                    feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
 
                 ct_losses += output.loss_ct 
                 tc_losses += output.loss_tc
@@ -205,7 +205,13 @@ class PolicyTrainer(Trainer):
         pos_ratio_truth = torch.stack(pos_ratio_truth, 0)
         pos_ratio = torch.stack(pos_ratio, 0)
         logprobs = torch.stack(logprobs, 0)
+
+        # normal REINFORCE
         rewards = torch.stack(rewards, 0).to(logprobs.device)
+
+        # baseline-enhanced REINFORCE
+        # rewards = [r - reward_0 for r in rewards]
+        # rewards = torch.stack(rewards, 0).to(logprobs.device)
 
         # ignore after the reaching the optimal reward 
         if self.args.rl_coef == -1:
@@ -233,8 +239,10 @@ class PolicyTrainer(Trainer):
 
         print('---')
         print('\nDocument +/- ', self.train_dataset[data_indices[0]]['contexts'])
-        print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
-        print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
+        print('\nRetrieved doc (q0):', [c['text'][:30] for c in candidates_0[0]])
+        print('\nRetrieved doc (q0 & f1):', [c['text'][:30] for c in candidates[0]])
+        # print('\nRetrieved doc (q0):', [c['title'] for c in candidates_0[0]])
+        # print('\nRetrieved doc (q0 & f1):', [c['title'] for c in candidates[0]])
         print('\nFeedback: ', self.train_dataset.feedbacks[data_indices[0]])
 
         print('\nquestion: ', questions[0])
@@ -314,4 +322,76 @@ class PolicyTrainer(Trainer):
         metrics.update(eval_metrics)
         self.log(metrics)
         
+        return metrics
+
+    def iteration_loop(
+        self,
+        dataloader,
+        description,
+        ignore_keys=None,
+        metric_key_prefix="eval",
+    ):
+        # Initialize metrics
+        metrics = {}
+        total_rewards = []
+
+        # Initialize metrics for this batch
+        rewards = {0: [], 1: [], 2: []}
+        print(f"In total, {len(dataloader)} examples")
+        for batch in dataloader:
+
+            questions = batch["query"]
+            data_indices = batch["index"]
+            ids = [self.eval_dataset.ids[idx] for idx in data_indices]
+            qrels = [self.eval_dataset.qrels[id] for id in ids]
+
+            for t in range(0, 2):
+                if t == 0:
+                    retriever_inputs = batch["inputs_for_retriever"]
+                    output = self.model(
+                        q_tokens=retriever_inputs['q_tokens'][0],
+                        q_masks=retriever_inputs['q_masks'][0],
+                        step=0,
+                        tokenizer=self.tokenizer
+                    )
+                    reward, candidates = self.compute_loss_reward(output.reps, questions, truth=qrels)
+                    feedback = self.compute_loss_feedback(questions, candidates)
+                    q_out = output
+                    rewards[0].append(reward.detach().cpu())
+
+                else:
+                    retriever_inputs = self.data_collator.get_inputs_for_retriever(
+                        [self.eval_dataset[idx] for idx in data_indices],
+                        device=self.args.device
+                    )
+                    output = self.model(
+                        q_tokens=retriever_inputs['q_tokens'][0],
+                        q_masks=retriever_inputs['q_masks'][0],
+                        f_tokens=retriever_inputs['q_tokens'][t],
+                        f_masks=retriever_inputs['q_masks'][t],
+                        d_tokens=None,
+                        d_masks=None,
+                        prev_output=output,
+                        sub_token_type_ids=retriever_inputs['q_types'][t],
+                        step=t,
+                        tokenizer=self.tokenizer,
+                    )
+                    reward, candidates = self.compute_loss_reward(output.reps, questions, truth=qrels)
+                    feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
+                    rewards[t].append(reward.detach().cpu())
+
+                # Store feedback 
+                for j in range(len(data_indices)):
+                    self.eval_dataset.add_feedback(data_indices[j], feedback[j])
+
+        # finish one batch
+        rewards_0 = torch.cat(rewards[0]) # B N
+        rewards_1 = torch.cat(rewards[1]) # B N
+        metrics['value-0'] = rewards_0.mean()
+        metrics['value-1'] = rewards_1.mean()
+        metrics['win'] = (rewards_1 > rewards_0).sum().item()
+        metrics['lose'] = (rewards_0 > rewards_1).sum().item()
+
+        # rewards_2 = torch.cat(rewards[2]) # B N
+        # metrics['value-2'] = rewards_1.mean()
         return metrics

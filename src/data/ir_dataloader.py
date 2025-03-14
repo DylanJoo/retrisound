@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import ir_datasets
+from collections import defaultdict
 
 from tqdm.autonotebook import tqdm
 
@@ -44,19 +45,22 @@ class IRDataLoader:
             raise ValueError(f"File {fIn} must be present with extension {ext}")
 
     def load_from_ir_datasets(
-        self,
+        self, ignore_corpus=False
     ) -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, int]]]:
         dataset = ir_datasets.load(self.prefix)
 
         # Corpus
-        logger.info("Loading Corpus...")
-        for doc in dataset.docs_iter():
-            self.corpus[doc.doc_id] = {
-                "text": doc.text,
-                "title": doc.title if hasattr(doc, "title") else "",
-            }
-        logger.info("Loaded %d Documents.", len(self.corpus))
-        logger.info("Doc Example: %s", list(self.corpus.values())[0])
+        if ignore_corpus:
+            self.corpus = defaultdict(lambda: {'title': "", 'text': ''})
+        else:
+            logger.info("Loading Corpus...")
+            for doc in dataset.docs_iter():
+                self.corpus[doc.doc_id] = {
+                    "text": doc.text,
+                    "title": doc.title if hasattr(doc, "title") else "",
+                }
+            logger.info("Loaded %d Documents.", len(self.corpus))
+            logger.info("Doc Example: %s", list(self.corpus.values())[0])
 
         # Queries
         logger.info("Loading Queries...")

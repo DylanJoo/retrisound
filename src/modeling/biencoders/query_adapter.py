@@ -90,15 +90,22 @@ class SparseAdaptiveRetriever(nn.Module):
                     labels_tc.append(label)
 
                 ## L1: token classification
-                loss_tc = CELoss(output.logits.view(-1, 2), labels_tc[0].view(-1))
+                if output.logits.size(-1) == 1:
+                    probs = torch.zeros( (output.logits.size(0), output.logits.size(1), 2), device=output.logits.device) # (B L 2)
+                    probs[:, :, 1] += output.logits.squeeze(-1)
+                    probs[:, :, 0] += 1 - probs[:, :, 1]
+                    loss_tc = CELoss(probs.view(-1, 2), labels_tc[0].view(-1))
+                else:
+                    probs = output.logits.softmax(-1)
+                    loss_tc = CELoss(output.logits.view(-1, 2), labels_tc[0].view(-1))
+
                 pos_ratio_truth = (labels_tc[0]>=1).sum()  / (labels_tc[0]!=-100).sum()
                 pos_ratio = (select_tokens>=1).sum()  / (labels_tc[0]!=-100).sum()
 
                 ## L2: contrastive learning
+                ### [TODO] the weight should aligns to activation used
                 d_reps = torch.stack(d_reps, dim=0)
-                q_rep = transform_weights_to_vector(
-                    select_tokens, output.logits.softmax(-1)[:, :, 1], self.config.vocab_size
-                )
+                q_rep = transform_weights_to_vector(select_tokens, probs[:, :, 1], self.config.vocab_size)
 
                 scores_t = q_rep @ d_reps.view(-1, self.config.vocab_size).transpose(1, 0)   # B V x BN V
                 labels_ct = torch.arange(0, batch_size, device=q_rep.device, dtype=torch.long)

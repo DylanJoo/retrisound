@@ -18,6 +18,7 @@ class SparseAdaptiveRetriever(nn.Module):
         self.encoder = (encoder or q_encoder)
         self.config = q_encoder.config
         self.num_samples = kwargs.get('num_samples')
+        self.topk = kwargs.get('topk', 10)
 
         if kwargs.get('sample_type') == 'deterministic':
             self.selected_sample = 0
@@ -64,7 +65,7 @@ class SparseAdaptiveRetriever(nn.Module):
 
             # add sampling here
             actions, logprobs, selections = sample_actions_dist(
-                candidate_tokens, output.logits, samples=self.num_samples, topk=30
+                candidate_tokens, output.logits, samples=self.num_samples, topk=(kwargs.pop('topk', None) or self.topk)
             )
 
             logprobs = logprobs.transpose(1, 0) # N B
@@ -88,8 +89,13 @@ class SparseAdaptiveRetriever(nn.Module):
                     label = make_labels(d_indices, candidate_tokens, candidate_masks)
                     labels_tc.append(label)
 
+                # transform logits into prob for computing MSE loss
+                logits = output.logits.squeeze(-1)
+                if self.q_encoder.use_logits: 
+                    logits = logits.sigmoid()
+
                 ## L1: token classification
-                loss_tc = MSELoss(output.logits.squeeze(-1), labels_tc[0].float())
+                loss_tc = MSELoss(logits, labels_tc[0].float())
                 loss_tc = loss_tc * (labels_tc[0]!=-100).float()
                 loss_tc = loss_tc.sum() / (labels_tc[0]!=-100).sum()
 
@@ -98,9 +104,7 @@ class SparseAdaptiveRetriever(nn.Module):
 
                 ## L2: contrastive learning
                 d_reps = torch.stack(d_reps, dim=0)
-                q_rep = transform_weights_to_vector(
-                    actions[:, 0, :], output.logits[:, :, 0], self.config.vocab_size
-                )
+                q_rep = transform_weights_to_vector(actions[:, 0, :], logits, self.config.vocab_size)
 
                 scores_t = q_rep @ d_reps.view(-1, self.config.vocab_size).transpose(1, 0)   # B V x BN V
                 labels_ct = torch.arange(0, batch_size, device=q_rep.device, dtype=torch.long)

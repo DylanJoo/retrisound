@@ -23,19 +23,26 @@ def main():
     q_encoder = SparseEncoderForTokenClf.from_pretrained(
         (model_opt.query_encoder_name_or_path or model_opt.retriever_name_or_path),
         add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers,
-        num_labels=1
+        num_labels=1, use_logits=True
     )
     retriever = SparseAdaptiveRetriever(
         q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type,
-        num_samples=train_opt.num_samples
+        num_samples=train_opt.num_samples, topk=model_opt.topk
     )
 
     # [Environment: Generator]
     from options import LLMOptions
-    # from modeling.llm.vllm_back import LLM
+    from modeling.llm.vllm_api import LLM
     from modeling.llm.hf_back import dummyLLM
     llm_opt = LLMOptions()
-    generator = dummyLLM()
+    if model_opt.generator_name_or_path is None:
+        generator = dummyLLM()
+    else:
+        generator = LLM(
+            model=model_opt.generator_name_or_path, temperature=0.7,
+            max_num_batched_tokens=20480, max_model_len=20480,
+            gpu_memory_utilization=0.5
+        )
 
     # [Environment: Searcher]
     from utils import load_searcher
@@ -50,7 +57,8 @@ def main():
         n_negative_samples=model_opt.n_negative_samples,
         quick_test=train_opt.quick_test,
     )
-    train_dataset.load_prebuilt_feedback()
+    if 'msmarco-passage' in data_opt.train_file:
+        train_dataset.load_prebuilt_feedback()
 
     if train_opt.do_eval:
         eval_dataset = PRFDataset(
@@ -68,7 +76,7 @@ def main():
     # [trainer]
     os.environ["WANDB_PROJECT"] = train_opt.wandb_project
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from trainer_ir import PolicyTrainer
+    from trainer import PolicyTrainer
     trainer = PolicyTrainer(
         args=train_opt,
         model=retriever,
@@ -78,7 +86,12 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
+        dataset_name=data_opt.train_file,
+        num_generation=model_opt.num_generation
     )
+    if train_opt.do_eval:
+        trainer.evaluate()
+
     trainer.train()
     trainer.save_model(train_opt.output_dir)
 

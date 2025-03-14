@@ -1,3 +1,4 @@
+import numpy as np
 import torch.nn as nn
 import torch
 
@@ -20,13 +21,19 @@ def transform_weights_to_vector(inputs, weights, vocab_size):
 
 def sample_actions(logits, samples=1, attention_mask=None):
     actions, logprobs = [], []
-    probs = logits.softmax(-1)
+    if logits.size(-1) == 1:
+        probs = torch.zeros( (logits.size(0), logits.size(1), 2), device=logits.device) # (B L 2)
+        probs[:, :, 1] += logits.squeeze(-1).softmax(-1)
+        probs[:, :, 0] += 1 - probs[:, :, 1]
+    else:
+        probs = logits.softmax(-1) # (B L 2)
+
     m = torch.distributions.one_hot_categorical.OneHotCategorical(probs)
 
     for i in range(samples):
         if i == 0: # deterministic
-            action = torch.zeros_like(logits).scatter_(2, logits.argmax(-1).unsqueeze(-1), 1.)
-            action = action.type(logits.dtype)
+            action = torch.zeros_like(probs).scatter_(2, probs.argmax(-1).unsqueeze(-1), 1.)
+            action = action.type(probs.dtype)
         else: # sampled
             action = m.sample()
 
@@ -43,19 +50,28 @@ def sample_actions(logits, samples=1, attention_mask=None):
     return actions, logprobs
 
 def sample_actions_dist(token_indices, scores, samples=1, attention_mask=None, topk=5):
+    # the sorted
+    action_d, logprob_d = multiple_sample_and_log_probability(
+        scores=scores.squeeze(-1),
+        sample_size=1, 
+        batch=True,
+        topk_estimate=topk
+    ) # (B N L) (B N)
+
     actions, logprobs = multiple_sample_and_log_probability(
         scores=scores.squeeze(-1),
         sample_size=samples, 
         batch=True,
         topk_estimate=topk
     ) # (B N L) (B N)
-    # actions = actions[:, :, :topk]
+
+    actions[:, 0, :] = action_d[:, 0, :]
+    logprobs[:, 0] = logprob_d[:, 0]
 
     selections = []
     for i in range(samples):
         # map the sampled positions to the original indices (actions)
-        # selection = torch.gather(token_indices, 1, actions[:, i, :])[:, :topk]
-        selection = torch.gather(token_indices, 1, actions[:, i, :topk])
+        selection = torch.gather(token_indices, 1, actions[:, i, :])[:, :topk]
         selections.append(selection)
 
     return actions, logprobs, selections
@@ -82,71 +98,49 @@ def multiple_sample_and_log_probability(
     topk_estimate=None,
     tau=1
 ):
-    if not batch:
-        assert scores.dim() == 1
-        subtracts = scores.new_zeros((sample_size, scores.size(0)))
-        batch_index = torch.arange(sample_size, device=scores.device)
-        if return_prob:
-            log_probs = torch.zeros_like(subtracts, dtype=torch.float)
-        rankings = []
-        for j in range(scores.size(0)):
-            probs = nn.functional.softmax( (scores - subtracts)/tau, dim=1) + 1e-10
-            if sort:
-                posj = torch.argmax(probs, 1).squeeze(-1)
-            elif baseline:
-                posj = j
-            else:
-                posj = torch.multinomial(probs, 1).squeeze(-1)
-            rankings.append(posj)
-            if return_prob:
-                log_probs[:, j] = probs[batch_index, posj].log()
-            subtracts[batch_index, posj] = scores[posj] + 1e6
-        rankings = torch.stack(rankings, dim=1)
-        if return_prob:
-            log_probs = log_probs.sum(dim=1)
-            return rankings, log_probs
-        else:
-            return rankings
+    assert scores.dim() == 2
+    batch_size, candidiate_size = scores.size(0), scores.size(1)
+    subtracts = scores.new_zeros((batch_size, sample_size, candidiate_size))
+    batch_index = torch.arange(
+        batch_size, device=scores.device).unsqueeze(1).expand(
+        batch_size, sample_size)
+    sample_index = torch.arange(
+        sample_size, device=scores.device).expand(
+        batch_size, sample_size)
+    if return_prob:
+        log_probs = torch.zeros_like(subtracts, dtype=torch.float)
+    rankings = []
+    topk_estimate = (topk_estimate or scores.size(1))
 
-    else:
-        assert scores.dim() == 2
-        batch_size, candidiate_size = scores.size(0), scores.size(1)
-        subtracts = scores.new_zeros((batch_size, sample_size, candidiate_size))
-        batch_index = torch.arange(
-            batch_size, device=scores.device).unsqueeze(1).expand(
-            batch_size, sample_size)
-        sample_index = torch.arange(
-            sample_size, device=scores.device).expand(
-            batch_size, sample_size)
-        if return_prob:
-            log_probs = torch.zeros_like(subtracts, dtype=torch.float)
-        rankings = []
-        for j in range(scores.size(1)):
-            probs = nn.functional.softmax(
-                (scores.unsqueeze(1) - subtracts)/tau, dim=-1) + 1e-10
-            if sort:
-                posj = torch.argmax(
-                    probs.reshape(batch_size * sample_size, -1),
-                    1
-                ).squeeze(-1).reshape(batch_size, sample_size)
-            elif baseline:
-                posj = torch.tensor(
-                    [j] * (batch_size * sample_size)
-                ).reshape(batch_size, sample_size)
-            else:
-                posj = torch.multinomial(
-                    probs.reshape(batch_size * sample_size, -1),
-                    1
-                ).squeeze(-1).reshape(batch_size, sample_size)
-            rankings.append(posj)
-            if return_prob:
-                log_probs[:, :, j] = probs[batch_index,
-                                           sample_index, posj].log()
-            subtracts[batch_index, sample_index,
-                      posj] = scores[batch_index, posj] + 1e6
-        rankings = torch.stack(rankings, dim=-1)
-        if return_prob:
-            log_probs = log_probs[:, :, :topk_estimate].sum(dim=-1)
-            return rankings, log_probs
+    # real sampling
+    for j in range(scores.size(1)):
+        probs = nn.functional.softmax(
+            (scores.unsqueeze(1) - subtracts)/tau, dim=-1) + 1e-10
+        if (sort or j > topk_estimate):
+            posj = torch.argmax(
+                probs.reshape(batch_size * sample_size, -1),
+                1
+            ).squeeze(-1).reshape(batch_size, sample_size)
+        elif baseline:
+            posj = torch.tensor(
+                [j] * (batch_size * sample_size)
+            ).reshape(batch_size, sample_size)
         else:
-            return rankings
+            posj = torch.multinomial(
+                probs.reshape(batch_size * sample_size, -1),
+                1
+            ).squeeze(-1).reshape(batch_size, sample_size)
+        rankings.append(posj)
+        if return_prob:
+            log_probs[:, :, j] = probs[batch_index,
+                                       sample_index, posj].log()
+        subtracts[batch_index, sample_index,
+                  posj] = scores[batch_index, posj] + 1e6
+    rankings = torch.stack(rankings, dim=-1)
+    # rankings = rankings[:, :, :topk_estimate]
+    if return_prob:
+        log_probs = log_probs[:, :, :topk_estimate].mean(dim=-1)
+        # log_probs = log_probs[:, :, :topk_estimate].sum(dim=-1)
+        return rankings, log_probs
+    else:
+        return rankings

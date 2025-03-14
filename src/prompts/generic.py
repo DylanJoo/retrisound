@@ -50,7 +50,7 @@ def apply_followup_inst_prompt(Q, D, prefix=None):
 #### Ambiguous query
 def apply_asqa_inst_prompt(Q, D, prefix=None):
     prompt = \
-        "Answer the following question. The question may be ambiguous and have multiple correct answers, " +\
+        "Answer the complex question. The question may be ambiguous and have multiple correct answers, " +\
         "and in that case, you have to provide a long-form answer including all correct answers. " + \
         "Cite the search results if they can support the answer."
     template = "{prompt}\n\nQuestion: {Q}\nSearch results:\n{D}\nAnswer:"
@@ -58,21 +58,41 @@ def apply_asqa_inst_prompt(Q, D, prefix=None):
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
 
+#### Multihop query
+def apply_mqa_inst_prompt(Q, D, R=None, prefix=None):
+    prompt_0 = \
+        "Write a short passage that answers the given question. Only use the given relevant search results to draft the passage " + \
+        "(some of the search results might be irrelevant). " + \
+        "Answer the question step by step. " + \
+        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
+    prompt_1 = \
+        "Based on the given question and the draft passage, refine the draft passage if any search results can answer the question better. " + \
+        "(some of the search results might be irrelevant). " + \
+        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
+    if R is None:
+        template = "{prompt}\n\nQuestion: {Q}\nSearch results:\n{D}\nPassage:\n<p>"
+        p = template.replace('{prompt}', prompt_0)
+    else:
+        template = "{prompt}\n\nQuestion: {Q}\nSearch results:\n{D}\nDraft passage: {R}\nRefined passage:\n<p>"
+        p = template.replace('{prompt}', prompt_1).replace('{R}', R)
+    p = p.replace("{Q}", Q).replace("{D}", D)
+    return p
+
 #### Report generatio
 def apply_report_inst_prompt(Q, D=None, R=None, prefix=None):
     prompt_0 = \
-        "Write a passage that answers the given query. Use the provided search results to draft the answer " + \
+        "Write a short passage that answers the given query. Only use the given relevant search results to draft the passage " + \
         "(some of the search results might be irrelevant). " + \
-        "Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
+        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
     prompt_1 = \
-        "Given a query and the draft. Refine the draft if the provided search results can fix incorrect information in it. " + \
+        "Refine the draft passage if any search results can answer the given query better. " + \
         "(some of the search results might be irrelevant). " + \
-        "Rewrite a new passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end."
+        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
     if R is None:
-        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage: <p>"
+        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage:\n<p> "
         p = template.replace('{prompt}', prompt_0)
     else:
-        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nDraft: {R}\nPassage: <p>"
+        template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nDraft passage: {R}\nRefined passage:\n<p> "
         p = template.replace('{prompt}', prompt_1).replace('{R}', R)
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p

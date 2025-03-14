@@ -1,8 +1,8 @@
 #!/bin/sh
-#SBATCH --job-name=5hr.test
+#SBATCH --job-name=24hr.msmarco
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:tesla_p40:1
-#SBATCH --mem=32G
+#SBATCH --gres=gpu:nvidia_titan_v:4
+#SBATCH --mem=128G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
@@ -24,7 +24,6 @@ MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
 MODEL_SIZE=1B
 BASE_LLM=meta-llama/Llama-3.2-1B-Instruct
-# dataset=litsearch
 dataset=msmarco-passage/train
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
@@ -37,12 +36,11 @@ accelerate launch \
     --retriever_name_or_path $BASE_RET \
     --query_encoder_name_or_path $BASE_RET \
     --train_file ${dataset} \
-    --num_layers 2 \
-    --num_samples 300 \
+    --num_layers 1 \
+    --num_samples 30 \
     --split train \
     --sample_type random \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
-    --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 1e-4 \
     --lr_scheduler_type cosine \
@@ -59,6 +57,5 @@ accelerate launch \
     --rl_coef 1.0 \
     --do_train \
     --fp16 \
-    --index_dir ${INDEX_DIR}/neuclir1-mt/fas/splade-v3-doc.lucene \
+    --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.lucene \
     --logging_steps 1 --run_name $dataset:random:RL1
-    # --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.msmarco.lucene \

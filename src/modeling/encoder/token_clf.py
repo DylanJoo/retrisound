@@ -4,9 +4,10 @@ from transformers import BertForTokenClassification
 from modeling.outputs import SparseEncoderOutput
 
 class SparseEncoderForTokenClf(BertForTokenClassification):
-    def __init__(self, config):
+    def __init__(self, config, use_logits=False):
         super().__init__(config)
         self.num_labels = config.num_labels
+        self.use_logits = use_logits
 
     def forward(
         self,
@@ -42,7 +43,7 @@ class SparseEncoderForTokenClf(BertForTokenClassification):
         nonzero_indices = None
 
         if self.num_labels == 1:
-            tok_logits = nn.functional.relu(tok_logits)
+            tok_logits = tok_logits if self.use_logits else nn.functional.sigmoid(tok_logits)
 
         return SparseEncoderOutput(
             logits=tok_logits, 

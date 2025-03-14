@@ -32,7 +32,7 @@ def main():
 
     # [Environment: Generator]
     from options import LLMOptions
-    from modeling.llm.vllm_back import LLM
+    from modeling.llm.vllm_api import LLM
     from modeling.llm.hf_back import dummyLLM
     llm_opt = LLMOptions()
     if model_opt.generator_name_or_path is None:
@@ -40,7 +40,8 @@ def main():
     else:
         generator = LLM(
             model=model_opt.generator_name_or_path, temperature=0.7,
-            max_num_batched_tokens=20480, max_model_length=30000
+            max_num_batched_tokens=20480, max_model_len=20480,
+            gpu_memory_utilization=0.5
         )
 
     # [Environment: Searcher]
@@ -54,7 +55,6 @@ def main():
         split=data_opt.split,
         n_max_segments=train_opt.n_max_segments,
         n_negative_samples=model_opt.n_negative_samples,
-        quick_test=train_opt.quick_test,
     )
     if train_opt.do_eval:
         eval_dataset = PRFDataset(
@@ -62,12 +62,11 @@ def main():
             split='test',
             n_max_segments=train_opt.n_max_segments,
             n_negative_samples=model_opt.n_negative_samples,
-            max_examples=32
         )
     else:
         eval_dataset = None
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-    data_collator = PRFCollator(tokenizer=tokenizer_r)
+    data_collator = PRFCollator(tokenizer=tokenizer_r, max_src_length=model_opt.max_src_length)
 
     # [trainer]
     os.environ["WANDB_PROJECT"] = train_opt.wandb_project
@@ -82,7 +81,11 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
+        num_generation=model_opt.num_generation
     )
+    if train_opt.do_eval:
+        trainer.evaluate()
+
     trainer.train()
     trainer.save_model(train_opt.output_dir)
 

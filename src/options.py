@@ -10,17 +10,13 @@ class ModelOptions:
     index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
     n_negative_samples: Optional[int] = field(default=1)
-    fixed_d_encoder: Optional[bool] = field(default=False)
-    attn_implementation: Literal[None, 'sdpa', 'flash_attention_2'] = field(default=None)
     tau: Optional[float] = field(default=1.0)
     max_new_tokens: Optional[int] = field(default=32)
-    fusion_type: Optional[str] = field(default='ff')
     zero_init: bool = field(default=False)
     num_layers: int = field(default=12)
-    # num_budget: Optional[int] = field(default=5)
-    # sft: bool = field(default=False)
-    # samples: int = field(default=1)
-    # num_mem_tokens: Optional[int] = field(default=16)
+    max_src_length: Optional[int] = field(default=256)
+    topk: int = field(default=10)
+    num_generation: int = field(default=1)
 
 @dataclass
 class DataOptions:

@@ -12,7 +12,7 @@ from typing import List
 
 class dummyLLM:
 
-    def generate(self, inputs):
+    def generate(self, inputs, **kwargs):
         if len(inputs[0]) > 512:
             outputs = []
             for input in inputs:
