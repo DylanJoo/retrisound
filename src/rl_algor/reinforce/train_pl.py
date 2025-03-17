@@ -23,11 +23,11 @@ def main():
     q_encoder = SparseEncoderForTokenClf.from_pretrained(
         (model_opt.query_encoder_name_or_path or model_opt.retriever_name_or_path),
         add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers,
-        num_labels=1
+        num_labels=1, use_logits=True
     )
     retriever = SparseAdaptiveRetriever(
         q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type,
-        num_samples=train_opt.num_samples
+        num_samples=train_opt.num_samples, topk=model_opt.topk
     )
 
     # [Environment: Generator]
@@ -46,46 +46,55 @@ def main():
 
     # [Environment: Searcher]
     from utils import load_searcher
-    searcher = load_searcher(model_opt.index_dir, lexical=True)
+    searcher = load_searcher(data_opt.index_dir, lexical=True)
 
     # [data]
-    from data import PRFQADataset, PRFCollator
-    train_dataset = PRFQADataset(
+    from data import PRFDataset, PRFCollator
+    train_dataset = PRFDataset(
         dataset_dir=data_opt.train_file, 
         split=data_opt.split,
         n_max_segments=train_opt.n_max_segments,
         n_negative_samples=model_opt.n_negative_samples,
-        quick_test=train_opt.quick_test,
     )
+    if 'msmarco' in data_opt.train_file:
+        train_dataset.load_prebuilt_feedback()
 
     if train_opt.do_eval:
-        eval_dataset = PRFQADataset(
+        eval_dataset = PRFDataset(
             dataset_dir=(data_opt.eval_file or data_opt.train_file),
             split='test',
             n_max_segments=train_opt.n_max_segments,
             n_negative_samples=model_opt.n_negative_samples,
             max_examples=32
         )
+        if data_opt.eval_index_dir is not None:
+            eval_searcher = load_searcher(data_opt.eval_index_dir, lexical=True)
     else:
         eval_dataset = None
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
-    data_collator = PRFCollator(tokenizer=tokenizer_r)
+    data_collator = PRFCollator(tokenizer=tokenizer_r, max_src_length=model_opt.max_src_length)
 
     # [trainer]
     os.environ["WANDB_PROJECT"] = train_opt.wandb_project
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from trainer_qa import PolicyTrainer
+    from trainer_pl import PolicyTrainer
     trainer = PolicyTrainer(
         args=train_opt,
         model=retriever,
         generator=generator,
         searcher=searcher,
+        eval_searcher=load_searcher(data_opt.eval_index_dir, lexical=True) \
+                if data_opt.eval_index_dir is not None else None,
         tokenizer=tokenizer_r,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
+        num_generation=model_opt.num_generation,
         dataset_name=data_opt.train_file
     )
+    if train_opt.do_eval:
+        trainer.evaluate()
+
     trainer.train()
     trainer.save_model(train_opt.output_dir)
 

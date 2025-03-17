@@ -7,7 +7,6 @@ class ModelOptions:
     retriever_name_or_path: Optional[str] = field(default="")
     query_encoder_name_or_path: Optional[str] = field(default="")
     generator_name_or_path: Optional[str] = field(default=None)
-    index_dir: Optional[str] = field(default="")
     add_pooling_layer: Optional[bool] = field(default=False)
     n_negative_samples: Optional[int] = field(default=1)
     tau: Optional[float] = field(default=1.0)
@@ -27,6 +26,8 @@ class DataOptions:
     eval_file: Optional[str] = field(default=None)
     split: Optional[str] = field(default=None)
     depth: Optional[int] = field(default=30)
+    index_dir: Optional[str] = field(default="")
+    eval_index_dir: Optional[str] = field(default=None)
 
 from transformers import TrainingArguments
 @dataclass

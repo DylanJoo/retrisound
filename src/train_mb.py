@@ -17,17 +17,17 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    from modeling.biencoders.query_reformulator import SparseAdaptiveRetriever
+    from modeling.biencoders.query_adapter import SparseAdaptiveRetriever
     from modeling.encoder import SparseEncoder, SparseEncoderForTokenClf
     encoder = SparseEncoder.from_pretrained(model_opt.retriever_name_or_path).eval()
     q_encoder = SparseEncoderForTokenClf.from_pretrained(
         (model_opt.query_encoder_name_or_path or model_opt.retriever_name_or_path),
         add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers,
-        num_labels=1, use_logits=True
+        num_labels=2
     )
     retriever = SparseAdaptiveRetriever(
         q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type,
-        num_samples=train_opt.num_samples, topk=model_opt.topk
+        num_samples=train_opt.num_samples
     )
 
     # [Environment: Generator]
@@ -56,7 +56,7 @@ def main():
         n_max_segments=train_opt.n_max_segments,
         n_negative_samples=model_opt.n_negative_samples,
     )
-    if 'msmarco-passage' in data_opt.train_file:
+    if 'msmarco' in data_opt.train_file:
         train_dataset.load_prebuilt_feedback()
 
     if train_opt.do_eval:
@@ -67,8 +67,6 @@ def main():
             n_negative_samples=model_opt.n_negative_samples,
             max_examples=32
         )
-        if data_opt.eval_index_dir is not None:
-            eval_searcher = load_searcher(data_opt.eval_index_dir, lexical=True)
     else:
         eval_dataset = None
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)
@@ -77,17 +75,20 @@ def main():
     # [trainer]
     os.environ["WANDB_PROJECT"] = train_opt.wandb_project
     train_opt.gradient_checkpointing_kwargs={"use_reentrant": False}
-    from trainer import PolicyTrainer
+    from trainer_mb import PolicyTrainer
     trainer = PolicyTrainer(
         args=train_opt,
         model=retriever,
         generator=generator,
         searcher=searcher,
+        eval_searcher=load_searcher(data_opt.eval_index_dir, lexical=True) \
+                if data_opt.eval_index_dir is not None else None,
         tokenizer=tokenizer_r,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
-        num_generation=model_opt.num_generation
+        num_generation=model_opt.num_generation,
+        dataset_name=data_opt.train_file
     )
     if train_opt.do_eval:
         trainer.evaluate()

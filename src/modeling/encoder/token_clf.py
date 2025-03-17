@@ -45,6 +45,7 @@ class SparseEncoderForTokenClf(BertForTokenClassification):
         if self.num_labels == 1:
             tok_logits = tok_logits if self.use_logits else nn.functional.sigmoid(tok_logits)
 
+        # [todo] add the probability output in addition to tok-logits
         return SparseEncoderOutput(
             logits=tok_logits, 
             indices=nonzero_indices,

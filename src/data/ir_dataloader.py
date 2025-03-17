@@ -51,7 +51,8 @@ class IRDataLoader:
 
         # Corpus
         if ignore_corpus:
-            self.corpus = defaultdict(lambda: {'title': "", 'text': ''})
+            # self.corpus = defaultdict(lambda: {'title': "", 'text': ''})
+            self.corpus = None
         else:
             logger.info("Loading Corpus...")
             for doc in dataset.docs_iter():

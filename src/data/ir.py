@@ -58,7 +58,7 @@ class PRFDataset(Dataset):
 
         self.length = len(self.queries)
         self.ids = list(self.queries.keys())
-        self.corpus_ids = list(self.corpus.keys())
+        self.corpus_ids = list(self.corpus.keys()) if self.corpus else []
 
         ## training attributes
         self.n_max_segments = n_max_segments
@@ -110,6 +110,13 @@ class PRFDataset(Dataset):
 
         n = self.n_feedbacks[idx]
         query = self.queries[id]
+
+        if self.split == 'test':
+            return {'index': idx,
+                    'query': query,
+                    'feedbacks': self.feedbacks[idx],
+                    'n_feedbacks': n, 
+                    'contexts': [{"title": "", "text": ""}] * (1 + self.n_negative_samples) }
 
         # positive
         judged_positive_ids = [pid for pid, score in self.qrels[id].items() if int(score) >= 1]
