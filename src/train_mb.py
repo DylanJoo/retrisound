@@ -17,17 +17,18 @@ def main():
     set_seed(train_opt.seed)
 
     # [Retriever]
-    from modeling.biencoders.query_adapter import SparseAdaptiveRetriever
-    from modeling.encoder import SparseEncoder, SparseEncoderForTokenClf
+    from modeling.encoder import SparseEncoder, SparseEncoderExp
     encoder = SparseEncoder.from_pretrained(model_opt.retriever_name_or_path).eval()
-    q_encoder = SparseEncoderForTokenClf.from_pretrained(
+    q_encoder = SparseEncoderExp.from_pretrained(
         (model_opt.query_encoder_name_or_path or model_opt.retriever_name_or_path),
         add_cross_attention=False, is_decoder=False, num_hidden_layers=model_opt.num_layers,
         num_labels=2
     )
+
+    from modeling.biencoders.query_mb import SparseAdaptiveRetriever
     retriever = SparseAdaptiveRetriever(
         q_encoder=q_encoder, encoder=encoder, sample_type=train_opt.sample_type,
-        num_samples=train_opt.num_samples
+        num_samples=train_opt.num_samples,
     )
 
     # [Environment: Generator]
@@ -67,6 +68,8 @@ def main():
             n_negative_samples=model_opt.n_negative_samples,
             max_examples=32
         )
+        if data_opt.eval_index_dir is not None:
+            eval_searcher = load_searcher(data_opt.eval_index_dir, lexical=True)
     else:
         eval_dataset = None
     tokenizer_r = AutoTokenizer.from_pretrained(model_opt.retriever_name_or_path)

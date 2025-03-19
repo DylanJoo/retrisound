@@ -1,14 +1,13 @@
 import torch
 import torch.nn as nn
-from transformers import BertForMaskedLM
+from transformers import BertForTokenClassification
 from modeling.outputs import SparseEncoderOutput
 
-def normalize(tensor, eps=1e-9):
-    return tensor / (torch.norm(tensor, dim=-1, keepdim=True) + eps)
-
-class SparseEncoder(BertForMaskedLM):
-    def __init__(self, config):
+class SparseEncoderExp(BertForTokenClassification):
+    def __init__(self, config, use_logits=False):
         super().__init__(config)
+        self.num_labels = config.num_labels
+        self.use_logits = use_logits
 
     def forward(
         self,
@@ -16,16 +15,16 @@ class SparseEncoder(BertForMaskedLM):
         attention_mask=None,
         token_type_ids=None,
         position_ids=None,
-        head_mask=None,
         inputs_embeds=None,
+        head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
+        context_mask=None,
         output_attentions=None,
         output_hidden_states=None,
-        context_mask=None,
     ):
-        """ Add a context masking, to exclude the logits used for final sparse vectors."""
 
+        position_ids = self.bert.embeddings.position_ids[:, 0 : input_ids.size(1) + 0].clone()
         outputs = self.bert(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -33,27 +32,25 @@ class SparseEncoder(BertForMaskedLM):
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            encoder_hidden_states=None,
-            encoder_attention_mask=None,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=True,
         )
 
         last_hidden_states = outputs[0]
-        logits = self.cls(last_hidden_states)
-        logits = logits * (context_mask or attention_mask).unsqueeze(-1)
+        tok_logits = self.classifier(last_hidden_states)
+        nonzero_indices = None
 
-        # pooling/aggregation
-        values, _ = torch.max(
-            torch.log(1 + torch.relu(logits)) 
-            * attention_mask.unsqueeze(-1), dim=1
-        )
-        nonzero_indices = [row.nonzero(as_tuple=False).squeeze(1) for row in values]
+        if self.num_labels == 1:
+            tok_logits = tok_logits if self.use_logits else nn.functional.sigmoid(tok_logits)
 
+        # [todo] add the probability output in addition to tok-logits
         return SparseEncoderOutput(
-            reps=values, 
-            logits=logits, 
+            logits=tok_logits, 
             indices=nonzero_indices,
             last_hidden_states=last_hidden_states, 
+            all_hidden_states=outputs["hidden_states"], 
             mask=attention_mask
         )
+

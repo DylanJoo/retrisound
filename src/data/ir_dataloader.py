@@ -80,13 +80,18 @@ class IRDataLoader:
 
         return self.corpus, self.queries, self.qrels
 
-    def load(self, split="test") -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, int]]]:
+    def load(
+        self, split="test", ignore_corpus=False
+    ) -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, int]]]:
+
         self.qrels_file = os.path.join(self.qrels_folder, split + ".tsv")
         self.check(fIn=self.corpus_file, ext="jsonl")
         self.check(fIn=self.query_file, ext="jsonl")
         self.check(fIn=self.qrels_file, ext="tsv")
 
-        if not len(self.corpus):
+        if ignore_corpus:
+            self.corpus = None
+        else:
             logger.info("Loading Corpus...")
             self._load_corpus()
             logger.info("Loaded %d %s Documents.", len(self.corpus), split.upper())

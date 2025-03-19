@@ -50,6 +50,13 @@ def sample_actions(logits, samples=1, attention_mask=None):
     return actions, logprobs
 
 def sample_actions_dist(token_indices, scores, samples=1, attention_mask=None, topk=5):
+    """
+    return
+
+    - actions: (B N L)
+    - logprobs: (B N)
+    - selections: (N B L)
+    """
     # the sorted
     action_d, logprob_d = multiple_sample_and_log_probability(
         scores=scores.squeeze(-1),
@@ -64,14 +71,18 @@ def sample_actions_dist(token_indices, scores, samples=1, attention_mask=None, t
         batch=True,
         topk_estimate=topk
     ) # (B N L) (B N)
-
-    actions[:, 0, :] = action_d[:, 0, :]
-    logprobs[:, 0] = logprob_d[:, 0]
+    actions = actions.permute(1, 0, 2) # B N L -> (N B L)
+    actions[0] = action_d[0]
+    # logprobs = logprobs.permute(1, 0) # B N -> (N B)
+    logprobs = logprobs.transpose(0, 1) # B N -> (N B)
+    logprobs[0] = logprob_d[0]
 
     selections = []
     for i in range(samples):
-        # map the sampled positions to the original indices (actions)
-        selection = torch.gather(token_indices, 1, actions[:, i, :])[:, :topk]
+        # token_indices: the original token indices
+        # action: the selected indices (in the squence)
+        # selection: the token indices (in the vocab) of selected tokens
+        selection = torch.gather(token_indices, 1, actions[i])[:, :topk] #
         selections.append(selection)
 
     return actions, logprobs, selections
@@ -98,6 +109,12 @@ def multiple_sample_and_log_probability(
     topk_estimate=None,
     tau=1
 ):
+    """
+    return
+
+    - rankings: (B N L) or (N L)
+    - log_probs: (B N) or (N)
+    """
     assert scores.dim() == 2
     batch_size, candidiate_size = scores.size(0), scores.size(1)
     subtracts = scores.new_zeros((batch_size, sample_size, candidiate_size))
@@ -137,7 +154,6 @@ def multiple_sample_and_log_probability(
         subtracts[batch_index, sample_index,
                   posj] = scores[batch_index, posj] + 1e6
     rankings = torch.stack(rankings, dim=-1)
-    # rankings = rankings[:, :, :topk_estimate]
     if return_prob:
         log_probs = log_probs[:, :, :topk_estimate].mean(dim=-1)
         # log_probs = log_probs[:, :, :topk_estimate].sum(dim=-1)

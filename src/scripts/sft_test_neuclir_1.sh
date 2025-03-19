@@ -29,19 +29,20 @@ echo "$BATCH_SIZE_PER_GPU batch size per GPU"
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 BASE_LLM=meta-llama/Llama-3.2-3B-Instruct
-num_labels=1
 num_layers=2
+num_labels=1
 tc_coef=1
 rl_coef=1
 num_gen=1
+init=splade-v3-doc
 
 for lang in fas; do
-for topk in 0; do
+for topk in 30 50; do
 for num_samples in 100;do
-for rl_coef in 1 -1; do
+for rl_coef in 1; do
 
 dataset=neuclir1-mt/$lang
-exp=$dataset-random-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
+exp=${dataset}-${init}-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
     --main_process_port 29600 \
@@ -63,7 +64,7 @@ accelerate launch \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 1e-4 \
     --lr_scheduler_type cosine \
-    --warmup_ratio 0.1 \
+    --warmup_ratio 0.25 \
     --weight_decay 0. \
     --max_grad_norm 0.5 \
     --max_steps 1000 \

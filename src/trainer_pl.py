@@ -61,7 +61,7 @@ class PolicyTrainer(Trainer):
         eval_searcher=None,
         index_dir=None, 
         num_generation=False, 
-        dataset_name=None,
+        dataset_name="",
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -254,7 +254,6 @@ class PolicyTrainer(Trainer):
         self.log({"loss/RL": rl_losses.mean().item()})
         self.log({"loss/CT": ct_losses.mean().item()})
         self.log({"loss/TC": tc_losses.mean().item()})
-        self.log({"loss/MR": 0})
 
         print('---')
         print('\nDocument +/- ', self.train_dataset[data_indices[0]]['contexts'])
@@ -411,7 +410,4 @@ class PolicyTrainer(Trainer):
         metrics['failed'] = (rewards_1 == 0).sum().cpu().detach().numpy().item()
         metrics['win'] = (rewards_1 > rewards_0).sum().cpu().detach().numpy().item()
         metrics['lose'] = (rewards_0 > rewards_1).sum().cpu().detach().numpy().item()
-
-        # rewards_2 = torch.cat(rewards[2]) # B N
-        # metrics['value-2'] = rewards_1.mean()
         return metrics

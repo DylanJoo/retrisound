@@ -61,6 +61,7 @@ class PolicyTrainer(Trainer):
         eval_searcher=None,
         index_dir=None, 
         num_generation=False, 
+        dataset_name="",
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -70,6 +71,7 @@ class PolicyTrainer(Trainer):
         self.num_generation = num_generation
         self.eval_searcher = eval_searcher
         self.is_eval = False
+        self.dataset_name = dataset_name
 
     @staticmethod
     def measure_ranking(pids_pred, pids_truth):
@@ -88,7 +90,7 @@ class PolicyTrainer(Trainer):
     def compute_loss_reward(self, query, questions, truth=None):
         searcher = self.searcher
         if self.is_eval:
-            searcher = self.eval_searcher
+            searcher = (self.eval_searcher or searcher)
 
         hits = searcher.batch_search(
             logits=query.clone().float().detach().cpu().numpy(), 
@@ -252,7 +254,6 @@ class PolicyTrainer(Trainer):
         self.log({"loss/RL": rl_losses.mean().item()})
         self.log({"loss/CT": ct_losses.mean().item()})
         self.log({"loss/TC": tc_losses.mean().item()})
-        self.log({"loss/MR": 0})
 
         print('---')
         print('\nDocument +/- ', self.train_dataset[data_indices[0]]['contexts'])
@@ -376,7 +377,6 @@ class PolicyTrainer(Trainer):
                     feedback = self.compute_loss_feedback(questions, candidates)
                     q_out = output
                     rewards[0].append(reward.detach().cpu())
-
                 else:
                     retriever_inputs = self.data_collator.get_inputs_for_retriever(
                         [self.eval_dataset[idx] for idx in data_indices],
@@ -410,7 +410,4 @@ class PolicyTrainer(Trainer):
         metrics['failed'] = (rewards_1 == 0).sum().cpu().detach().numpy().item()
         metrics['win'] = (rewards_1 > rewards_0).sum().cpu().detach().numpy().item()
         metrics['lose'] = (rewards_0 > rewards_1).sum().cpu().detach().numpy().item()
-
-        # rewards_2 = torch.cat(rewards[2]) # B N
-        # metrics['value-2'] = rewards_1.mean()
         return metrics

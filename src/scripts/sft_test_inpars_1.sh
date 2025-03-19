@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=24hr.inpars
+#SBATCH --job-name=24h.inpars-pl
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
@@ -34,18 +34,19 @@ num_labels=1
 tc_coef=1
 rl_coef=1
 num_gen=1
+init=splade-v3-doc
 
-for dataset_name in scifact dbpedia-entity nfcorpus scidocs trec-covid climate-fever;do
+for dataset_name in dbpedia-entity nfcorpus trec-covid scidocs climate-fever;do
 for topk in 30; do
 for num_samples in 100;do
-for rl_coef in 1 -1; do
+for rl_coef in 1 0; do
 
 dataset=inpars-v2/$dataset_name
-exp=$dataset-random-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
+exp=${dataset_name}-${init}-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
     --main_process_port 29600 \
-    train.py \
+    train_pl.py \
     --retriever_name_or_path $BASE_RET \
     --query_encoder_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
@@ -56,7 +57,8 @@ accelerate launch \
     --topk $topk \
     --num_generation $num_gen \
     --split train \
-    --sample_type random \
+    --sample_type deterministic \
+    --max_src_length 512 \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
@@ -71,14 +73,14 @@ accelerate launch \
     --report_to wandb \
     --generation_batch 16 \
     --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
-    --num_steps 2 --n_max_segments 15 \
+    --num_steps 1 --n_max_segments 15 \
     --ct_coef 0.0 \
     --tc_coef $tc_coef \
     --rl_coef $rl_coef \
     --do_train \
     --do_eval \
     --eval_strategy steps \
-    --eval_steps 50 \
+    --eval_steps 100 \
     --fp16 \
     --index_dir ${INDEX_DIR}/${dataset/inpars-v2/beir-cellar}.lucene_doc \
     --logging_steps 1 --run_name $exp

@@ -3,7 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from modeling.outputs import AdaptiveHeadOutput, SparseAdaptiveEncoderOutput
 from modeling.biencoders.utils import (
-    make_labels, transform_weights_to_vector, sample_actions_dist, transform_ids_to_vector
+    make_labels, 
+    transform_weights_to_vector, 
+    sample_actions_dist, 
+    transform_ids_to_vector
 )
 
 class SparseAdaptiveRetriever(nn.Module):
@@ -11,20 +14,23 @@ class SparseAdaptiveRetriever(nn.Module):
         self, 
         q_encoder,
         encoder=None, 
+        num_samples=100,
+        topk=30,
         **kwargs # opt is unused
     ):
         super().__init__()
         self.q_encoder = q_encoder
         self.encoder = (encoder or q_encoder)
         self.config = q_encoder.config
-        self.num_samples = kwargs.get('num_samples')
-        self.topk = kwargs.get('topk', 10)
+        self.num_samples = num_samples
+        self.topk = topk
 
         if kwargs.get('sample_type') == 'deterministic':
             self.selected_sample = 0
         if kwargs.get('sample_type') == 'random':
             self.selected_sample = 1
 
+        # frozen the parameters of the encoder
         for n, p in self.named_parameters():
             if 'q_encoder' in n:
                 p.requires_grad = True
@@ -39,13 +45,13 @@ class SparseAdaptiveRetriever(nn.Module):
         d_tokens=None, d_masks=None, 
         prev_output=None,
         step=0,
+        topk=None,
         **kwargs
     ):
         d_reps = []
         loss_tc, loss_ct, loss_mr = None, None, None
         pos_ratio_truth = 0 
         pos_ratio = 0
-        # logprob = None
         sampled_reps = []
         logprobs = []
         tokenizer = kwargs.get('tokenizer')
@@ -63,12 +69,14 @@ class SparseAdaptiveRetriever(nn.Module):
             candidate_tokens = f_tokens
             candidate_masks = f_masks
 
-            # add sampling here
+            # sampling function
             actions, logprobs, selections = sample_actions_dist(
-                candidate_tokens, output.logits, samples=self.num_samples, topk=(kwargs.pop('topk', None) or self.topk)
+                candidate_tokens, 
+                output.logits, 
+                samples=self.num_samples,
+                topk=(topk or self.topk)
             )
 
-            logprobs = logprobs.transpose(1, 0) # N B
             for selection in selections:
                 rep = transform_ids_to_vector(selection, tokenizer, count=True)
                 sampled_reps.append(rep)
@@ -85,17 +93,20 @@ class SparseAdaptiveRetriever(nn.Module):
                 for i in range(n_candidates):
                     d_output = self.encoder(d_tokens[i], d_masks[i])
                     d_indices = d_output.indices
+
+                    # sparsity controls
+
                     d_reps.append(d_output.reps)
                     label = make_labels(d_indices, candidate_tokens, candidate_masks)
                     labels_tc.append(label)
 
-                # transform logits into prob for computing MSE loss
-                logits = output.logits.squeeze(-1)
+                ## Transformation
+                probs = output.logits.squeeze(-1)
                 if self.q_encoder.use_logits: 
-                    logits = logits.sigmoid()
+                    probs = probs.sigmoid()
 
-                ## L1: token classification
-                loss_tc = MSELoss(logits, labels_tc[0].float())
+                ## L1: token-level signals (regression)
+                loss_tc = MSELoss(probs, labels_tc[0].float())
                 loss_tc = loss_tc * (labels_tc[0]!=-100).float()
                 loss_tc = loss_tc.sum() / (labels_tc[0]!=-100).sum()
 
@@ -104,15 +115,15 @@ class SparseAdaptiveRetriever(nn.Module):
 
                 ## L2: contrastive learning
                 d_reps = torch.stack(d_reps, dim=0)
-                q_rep = transform_weights_to_vector(actions[:, 0, :], logits, self.config.vocab_size)
+                q_rep = transform_weights_to_vector(actions[0], probs, self.config.vocab_size)
 
-                scores_t = q_rep @ d_reps.view(-1, self.config.vocab_size).transpose(1, 0)   # B V x BN V
+                scores_t = q_rep @ d_reps.view(-1, self.config.vocab_size).transpose(1, 0)
                 labels_ct = torch.arange(0, batch_size, device=q_rep.device, dtype=torch.long)
                 loss_ct = CELoss(scores_t, labels_ct)
 
         return SparseAdaptiveEncoderOutput(
             reps=sampled_reps[self.selected_sample] if step > 0 else rep,
-            logprobs=logprobs[:, self.selected_sample] if step > 0 else None,
+            logprobs=logprobs[self.selected_sample] if step > 0 else None,
             prev_out=output,
             d_reps=d_reps,
             loss_ct=loss_ct,
