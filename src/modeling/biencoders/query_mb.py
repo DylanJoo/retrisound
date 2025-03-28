@@ -15,6 +15,7 @@ class SparseAdaptiveRetriever(nn.Module):
         q_encoder,
         encoder=None, 
         num_samples=100,
+        count=True
         **kwargs # opt is unused
     ):
         super().__init__()
@@ -22,6 +23,7 @@ class SparseAdaptiveRetriever(nn.Module):
         self.encoder = (encoder or q_encoder)
         self.config = q_encoder.config
         self.num_samples = num_samples
+        self.count = count
 
         if kwargs.get('sample_type') == 'deterministic':
             self.selected_sample = 0
@@ -55,13 +57,14 @@ class SparseAdaptiveRetriever(nn.Module):
 
         if (step == 0) and (prev_output is None):
             prev_output = output = self.encoder(q_tokens, q_masks)
-            rep = transform_ids_to_vector(q_tokens, tokenizer, count=True)
+            rep = transform_ids_to_vector(q_tokens, tokenizer, count=False)
         else:
             output = self.q_encoder(
                 input_ids=f_tokens,
                 attention_mask=f_masks,
                 token_type_ids=kwargs.pop('sub_token_type_ids', None),
             )
+
 
             candidate_tokens = f_tokens
             candidate_masks = f_masks
@@ -77,7 +80,7 @@ class SparseAdaptiveRetriever(nn.Module):
                     action[:, :, 1]==1, f_tokens, torch.full_like(candidate_tokens, 0)
                 )
                 rep = transform_ids_to_vector(
-                    selection, tokenizer, count=True
+                    selection, tokenizer, count=self.count
                 )
                 selections.append(selection)
                 sampled_reps.append(rep)
@@ -102,7 +105,7 @@ class SparseAdaptiveRetriever(nn.Module):
                 loss_tc = CELoss(output.logits.view(-1, 2), labels_tc[0].view(-1))
 
                 pos_ratio_truth = (labels_tc[0]>=1).sum()  / (labels_tc[0]!=-100).sum()
-                pos_ratio = (selections[0]==1).sum()  / (labels_tc[0]!=-100).sum()
+                pos_ratio = (selections[0]>=1).sum()  / (labels_tc[0]!=-100).sum()
 
                 ## L2: contrastive learning
                 d_reps = torch.stack(d_reps, dim=0)

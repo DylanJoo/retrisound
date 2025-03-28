@@ -67,7 +67,8 @@ class PolicyTrainer(Trainer):
         super().__init__(**kwargs)
         self.generator = generator
         self.searcher = searcher
-        self.annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=True)
+        # self.sft_annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=True)
+        self.rl_annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=False)
         self.num_generation = num_generation
         self.eval_searcher = eval_searcher
         self.is_eval = False
@@ -77,7 +78,7 @@ class PolicyTrainer(Trainer):
     def measure_ranking(pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
         run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
-        result = ir_measures.calc_aggregate([nDCG, R@10, RR@10], qrel, run)[nDCG] 
+        result = ir_measures.calc_aggregate([nDCG@10, R@10, RR@10], qrel, run)[nDCG@10] 
         return result
 
     def get_candidates(self, hits):
@@ -130,7 +131,7 @@ class PolicyTrainer(Trainer):
         )
         feedback = []
         for i in range(0, len(prompt), gen_batch):
-            b_feedback = self.generator.generate(prompt[i:i+gen_batch], max_tokens=256)
+            b_feedback = self.generator.generate(prompt[i:i+gen_batch], max_tokens=128) # 256 before
             # b_feedback = [remove_citations(f) for f in b_feedback]
             b_feedback = [replace_tags(f, 'p') for f in b_feedback]
             feedback += b_feedback
@@ -177,10 +178,10 @@ class PolicyTrainer(Trainer):
                 )
 
                 # msmarco can use pre-computed feedback. other used the online generated
-                if 'msmarco' in self.dataset_name:
-                    feedback = [self.train_dataset.feedbacks[idx][0] for idx in data_indices]
-                else:
-                    feedback = self.compute_loss_feedback(questions, candidates)
+                # if 'msmarco' in self.dataset_name:
+                #     feedback = [self.train_dataset.feedbacks[idx][0] for idx in data_indices]
+                # else:
+                feedback = self.compute_loss_feedback(questions, candidates)
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -234,12 +235,16 @@ class PolicyTrainer(Trainer):
 
         # ignore after the reaching the optimal reward 
         if self.args.rl_coef == -1:
-            rl_coef = self.annealer(1.0)
-            tc_coef = 1 - rl_coef
-            self.annealer.step()
+            rl_coef = self.rl_annealer(1.0)
+            self.rl_annealer.step()
+        else:
+            rl_coef = self.args.rl_coef
+
+        if self.args.tc_coef == -1:
+            tc_coef = 1 - self.sft_annealer(1.0)
+            self.sft_annealer.step()
         else:
             tc_coef = self.args.tc_coef
-            rl_coef = self.args.rl_coef
 
         rl_losses = (rewards * (-logprobs)).mean()
 
@@ -410,4 +415,5 @@ class PolicyTrainer(Trainer):
         metrics['failed'] = (rewards_1 == 0).sum().cpu().detach().numpy().item()
         metrics['win'] = (rewards_1 > rewards_0).sum().cpu().detach().numpy().item()
         metrics['lose'] = (rewards_0 > rewards_1).sum().cpu().detach().numpy().item()
+        metrics['tie'] = (rewards_1 == rewards_0).sum().cpu().detach().numpy().item()
         return metrics

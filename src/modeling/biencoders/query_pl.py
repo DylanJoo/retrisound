@@ -16,6 +16,7 @@ class SparseAdaptiveRetriever(nn.Module):
         encoder=None, 
         num_samples=100,
         topk=30,
+        count=False,
         **kwargs # opt is unused
     ):
         super().__init__()
@@ -24,6 +25,7 @@ class SparseAdaptiveRetriever(nn.Module):
         self.config = q_encoder.config
         self.num_samples = num_samples
         self.topk = topk
+        self.count = count
 
         if kwargs.get('sample_type') == 'deterministic':
             self.selected_sample = 0
@@ -58,7 +60,7 @@ class SparseAdaptiveRetriever(nn.Module):
 
         if (step == 0) and (prev_output is None):
             prev_output = output = self.encoder(q_tokens, q_masks)
-            rep = transform_ids_to_vector(q_tokens, tokenizer, count=True)
+            rep = transform_ids_to_vector(q_tokens, tokenizer, count=False)
         else:
             output = self.q_encoder(
                 input_ids=f_tokens,
@@ -78,7 +80,7 @@ class SparseAdaptiveRetriever(nn.Module):
             )
 
             for selection in selections:
-                rep = transform_ids_to_vector(selection, tokenizer, count=True)
+                rep = transform_ids_to_vector(selection, tokenizer, count=count)
                 sampled_reps.append(rep)
 
             # expand tokens

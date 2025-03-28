@@ -81,13 +81,13 @@ def apply_mqa_inst_prompt(Q, D, R=None, prefix=None):
 #### Report generatio
 def apply_report_inst_prompt(Q, D=None, R=None, prefix=None):
     prompt_0 = \
-        "Write a short passage that answers the given query. Only use the given relevant search results to draft the passage " + \
+        "Write a concise passage that answers the given query. Only use the given relevant search results to draft the passage " + \
         "(some of the search results might be irrelevant). " + \
-        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
+        "The passage shoule be within 50 words and be enclosed within <p> </p> tags."
     prompt_1 = \
         "Refine the draft passage if any search results can answer the given query better. " + \
         "(some of the search results might be irrelevant). " + \
-        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
+        "The passage shoule be within 50 words and be enclosed within <p> </p> tags."
     if R is None:
         template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage:\n<p> "
         p = template.replace('{prompt}', prompt_0)
@@ -97,27 +97,30 @@ def apply_report_inst_prompt(Q, D=None, R=None, prefix=None):
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
 
+def apply_report_inst_prompt_zs(Q, D):
+    prompt = "Write a concise passage that answers the given query. The passage should be witin 50 words and be enclosed within <p></p> tags."
+    template = "{prompt}\n\nQuery: {Q}\nPassage:\n<p>"
+    p = template.replace('{prompt}', prompt).replace('{Q}', Q)
+    return p
+
+def apply_rewrite_inst_prompt_zs(Q, D):
+    prompt = "Rewrite the query with richer contexts. The rewritten query should be withint 50 words and be dnclosed with <q></q> tags."
+    template = "{prompt}\n\nQuery: {Q}\nRewritten query:\n<q>"
+    p = template.replace('{prompt}', prompt).replace("{Q}", Q)
+    return p
+
+# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nContexts:\n{D}\nExplanation:\n"
+# prompt_report = "Rewrite the question with more comprehensive contexts, making the question easier to understand. Some useful preliminary knowledge could be found in the given texts (but some of which might be irrelevant)."
+# template_report = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
 
 ### prompts for thinking models
 # prompt_report_gen = "Write a passage that answers the given query: {Q}. Use your remembered documents and identify the relevant information to draft the passage. Write the passage within 100 words."
 # template_report_gen = "{prompt_report}\n\n<think>\nOkay, so I need to first recall a few relevant documents that are related to the query. Let me list these docuemnts first.\n{D}\nNow, I know how to write the passage to answer the query.</think>\n\n"
 
-### prompts for rewrite
-# prompt_report_gen = "Based on the given query and the given search results (some of them might be irrelevant), generate 10 sub-queries to expand searching scope. Add the `<p>` and `</p>` tags at the beginning and the end of 10 sub-queries."
-# template_report_gen = "{prompt_report}\n\nQuery: {Q}\nSearch results:\n{D}\nSub-queries:\n<p>"
-#
-# def apply_fbk_inst_prompt(Q, D, prefix="Report:\n"):
-#     p = template_report_gen.replace('{prompt_report}', prompt_report_gen)
-#     p = p.replace("{Q}", Q).replace("{D}", D)
-#     return p
-
 ### prompts for feedback (old)
 # prompt_report = "Write an accurate, engaging, and concise report for the given topic. Use only the provided search results (some of which might be irrelevant) and cite them properly. Always cite for any factual claim. Cite at least one document and at most three documents in each sentence."
 # template_report = "{prompt_report}\n\nTopic: {Q}\n\nSearch results:\n{D}\nReport:\n:"
 # prompt_report = "Elaborate the information need of the question in detail. Find the useful information in the given contexts (some of which might be irrelevant, please ignore). Write the explanation witin 50 words."
-# template_report = "{prompt_report}\n\nQuestion: {Q}\n\nContexts:\n{D}\nExplanation:\n"
-# prompt_report = "Rewrite the question with more comprehensive contexts, making the question easier to understand. Some useful preliminary knowledge could be found in the given texts (but some of which might be irrelevant)."
-# template_report = "{prompt_report}\n\nQuestion: {Q}\nTexts:\n{D}\nRewritten question:\n"
 
 ### prompts for response
 # prompt_rating = "Instruction: Determine whether the provided context is relevant to the given query? Rate the context with on a scale from 0 to 5 according to the guideline below. Do not write anything except the rating. Rate 0 if the context is empty."

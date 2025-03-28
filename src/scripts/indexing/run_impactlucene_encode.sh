@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:nvidia_titan_v:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
-#SBATCH --array=1-5%4
+#SBATCH --array=1-1%1
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/%x-%j.out
 
@@ -56,13 +56,23 @@ MULTIJOBS=/home/dju/temp/msmarco-passage_multijobs.txt
 #     --quantization_factor 100
 
 # msmarco-passage/train
-each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
-echo $each
+# each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
+# echo $each
+# python3 -m retrieval.mlm_encode \
+#     --model_name_or_path ${RETRIEVER} \
+#     --tokenizer_name ${RETRIEVER} \
+#     --collection /home/dju/datasets/${each} \
+#     --collection_output /home/dju/indexes/msmarco-passage/encoded/vectors.${each##*jsonl}.jsonl \
+#     --batch_size 64 \
+#     --max_length 256 \
+#     --quantization_factor 100
+
+# robust04
 python3 -m retrieval.mlm_encode \
     --model_name_or_path ${RETRIEVER} \
     --tokenizer_name ${RETRIEVER} \
-    --collection /home/dju/datasets/${each} \
-    --collection_output /home/dju/indexes/msmarco-passage/encoded/vectors.${each##*jsonl}.jsonl \
-    --batch_size 64 \
-    --max_length 256 \
+    --collection /home/dju/datasets/inpars-v2/robust04/corpus.jsonl \
+    --collection_output /home/dju/indexes/beir-cellar/robust04/encoded/vectors.01.jsonl \
+    --batch_size 32 \
+    --max_length 512 \
     --quantization_factor 100

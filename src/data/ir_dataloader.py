@@ -57,7 +57,7 @@ class IRDataLoader:
             logger.info("Loading Corpus...")
             for doc in dataset.docs_iter():
                 self.corpus[doc.doc_id] = {
-                    "text": doc.text,
+                    "text": doc.text if hasattr(doc, "text") else doc.body,
                     "title": doc.title if hasattr(doc, "title") else "",
                 }
             logger.info("Loaded %d Documents.", len(self.corpus))
@@ -66,7 +66,7 @@ class IRDataLoader:
         # Queries
         logger.info("Loading Queries...")
         for query in dataset.queries_iter():
-            self.queries[query.query_id] = query.text
+            self.queries[query.query_id] = query.text if hasattr(query, "text") else query.description
 
         # Qrels
         for qrel in dataset.qrels_iter():

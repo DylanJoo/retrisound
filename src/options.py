@@ -38,7 +38,7 @@ class ReinforceOptions(TrainingArguments):
     n_max_candidates: Optional[int] = field(default=10)
     num_steps: Optional[int] = field(default=1)
     run_name: Optional[str] = field(default='testing')
-    wandb_project: Optional[str] = field(default='adarag')
+    wandb_project: Optional[str] = field(default='ada_llr')
     max_steps: int = field(default=-1) # different from HF's  
     num_processes: Optional[int] = field(default=1)
     remove_unused_columns: Optional[bool] = field(default=False)

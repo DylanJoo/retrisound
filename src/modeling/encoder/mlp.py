@@ -4,10 +4,13 @@ from transformers import BertForTokenClassification
 from modeling.outputs import SparseEncoderOutput
 
 class SparseEncoderExp(BertForTokenClassification):
-    def __init__(self, config, use_logits=False):
+    def __init__(self, config, use_logits=False, zero_init=False):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.use_logits = use_logits
+        # if zero_init:
+        #     torch.nn.init.zeros_(self.classifier.weight)
+        #     torch.nn.init.zeros_(self.classifier.bias)
 
     def forward(
         self,

@@ -57,8 +57,8 @@ def main():
         n_max_segments=train_opt.n_max_segments,
         n_negative_samples=model_opt.n_negative_samples,
     )
-    if 'msmarco' in data_opt.train_file:
-        train_dataset.load_prebuilt_feedback()
+    # if 'msmarco' in data_opt.train_file:
+    #     train_dataset.load_prebuilt_feedback()
 
     if train_opt.do_eval:
         eval_dataset = PRFDataset(

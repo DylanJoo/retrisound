@@ -50,11 +50,19 @@ each=$(head -$SLURM_ARRAY_TASK_ID $MULTIJOBS | tail -1)
 #     --threads 36 \
 #     --storeDocvectors --impact --pretokenized
 
-# NeuCLIR
+# msmarco
+# python -m pyserini.index.lucene \
+#     --collection JsonVectorCollection \
+#     --input ${INDEX_DIR}/msmarco-passage/encoded \
+#     --index ${INDEX_DIR}msmarco-passage/train/splade-v3-doc.lucene \
+#     --generator DefaultLuceneDocumentGenerator \
+#     --threads 36 \
+#     --storeDocvectors --impact --pretokenized
+
 python -m pyserini.index.lucene \
     --collection JsonVectorCollection \
-    --input ${INDEX_DIR}/msmarco-passage/encoded \
-    --index ${INDEX_DIR}msmarco-passage/train/splade-v3-doc.lucene \
+    --input ${INDEX_DIR}/robust04/encoded \
+    --index ${INDEX_DIR}/robust04/splade-v3-doc.lucene \
     --generator DefaultLuceneDocumentGenerator \
     --threads 36 \
     --storeDocvectors --impact --pretokenized

@@ -15,9 +15,6 @@ from ir_measures import nDCG, R
 from tqdm import tqdm
 import pickle
 
-from modeling.biencoders.query_adapter import SparseAdaptiveRetriever
-from modeling.encoder import SparseEncoder, SparseEncoderForTokenClf
-
 def transform_ids_to_vector(inputs, tokenizer, count=False):
     vector = torch.zeros(inputs.size(0), tokenizer.vocab_size).to(inputs.device)
     if count:
@@ -50,18 +47,15 @@ def apply_docs_prompt(doc_items, field='text'):
     return p
 
 def prepare_encoder(args):
-    q_encoder = SparseEncoderForTokenClf.from_pretrained(
+    from modeling.encoder import SparseEncoderExp
+    q_encoder = SparseEncoderExp.from_pretrained(
         args.q_encoder_name_or_path,
         add_cross_attention=False, is_decoder=False, 
-        num_hidden_layers=2,
+        num_hidden_layers=1,
         num_labels=2
     )
-    encoder = SparseEncoder.from_pretrained(args.q_encoder_name_or_path)
-    retriever = SparseAdaptiveRetriever(
-        q_encoder=q_encoder, encoder=encoder, sample_type='deterministic', num_samples=2
-    ).to(args.device).eval()
     tokenizer = AutoTokenizer.from_pretrained(args.d_encoder_name)
-    return retriever, tokenizer
+    return q_encoder, tokenizer
 
 def postprocess_output(output, tag='p'):
     output = output.split(f'</{tag}>')[0]
@@ -71,12 +65,9 @@ def postprocess_output(output, tag='p'):
     output = re.sub(r"-\s", "", output).strip()
     return output
 
-EXAMPLE = ""
-prompt = {
-"qe": "Write a list of keywords for the given query. Add the `<p>` and `</p>` tags at the beginning and the end of the list.\nQuery: {}\nKeywords: <p>",
-"qr": "Rewrite the query for search engine to find more relevant information. Add the `<p>` and `</p>` tags at the beginning and the end.\nQuery: {}\nRewritten query: <p>",
-"rg": "Write a passage that answers the given query. Write the passage within 100 words. Add the `<p>` and `</p>` tags at the beginning and the end.\n\nQuery: {}\nPassage: <p>",
-}
+from prompts.generic import apply_report_inst_prompt, apply_report_inst_prompt_zs, apply_rewrite_inst_prompt_zs
+
+prompt = {"qr": apply_rewrite_inst_prompt_zs, "rg": apply_report_inst_prompt_zs, "prf-rg": apply_report_inst_prompt}
 
 @torch.no_grad()
 def evaluate(args):
@@ -94,9 +85,7 @@ def evaluate(args):
     ## [TODO] shuffle or small subset 
 
     ## load model 
-    ada_encoder, tokenizer = prepare_encoder(args) 
-    if 'doc' in args.d_encoder_name: 
-        del ada_encoder
+    _, tokenizer = prepare_encoder(args) 
 
     q_ids = list(queries.keys())[:args.debug]
 
@@ -117,13 +106,7 @@ def evaluate(args):
             padding=True,
             return_tensors='pt'
         ).to(args.device)
-
-        # BERT-based query encoder
-        if 'doc' in args.d_encoder_name:
-            q_reps = transform_ids_to_vector(q_inputs.input_ids, tokenizer, count=True)
-        else:
-            q_outputs = ada_encoder(q_inputs['input_ids'], q_inputs['attention_mask']) 
-            q_reps = q_outputs.reps
+        q_reps = transform_ids_to_vector(q_inputs.input_ids, tokenizer, count=args.count)
 
         ## iterative search -- 1
         hits = searcher.batch_search(
@@ -134,29 +117,27 @@ def evaluate(args):
         )
 
         ## iterative search > 1
-        if args.iteration > 0:
+        for iter in range(1, args.iteration+1):
 
             ### prepare LLMPRF
             prf_prompts = []
             for query, id in zip(batch_q_texts, hits):
                 docs = apply_docs_prompt([corpus[h.docid] for h in hits[id][:args.top_k]])
-                prf_prompts.append(prompt[args.prompt_type].format(query, docs))
+                prf_prompts.append(prompt[args.prompt_type](query, docs))
 
-            prf = generator.generate(prf_prompts, max_tokens=512, min_tokens=0)
-            batch_o_texts = [postprocess_output(o, tag='p') for o in prf]
+            prf = generator.generate(prf_prompts, max_tokens=128, min_tokens=0)
+            if args.prompt_type == 'qr':
+                batch_o_texts = [postprocess_output(o, tag='q') for o in prf]
 
-            #### Repear (or not)
-            batch_o_texts = [
-                (q * args.repeat_query + " " + o).strip() for (q, o) in zip(batch_q_texts, batch_o_texts)
-            ]
+            if args.prompt_type == 'rg':
+                batch_o_texts = [postprocess_output(o, tag='p') for o in prf]
 
-            #### demonstration
             for o, q in zip(batch_o_texts, batch_q_texts):
                 print(f"# {q} --> {o}\n")
 
             ### process feedbacks and queries and produce reprs.
             f_inputs = tokenizer(
-                batch_o_texts,
+                [(q * args.repeat_query + " " + o).strip() for (q, o) in zip(batch_q_texts, batch_o_texts)],
                 add_special_tokens=True,
                 max_length=args.max_length,
                 truncation=True,
@@ -165,27 +146,12 @@ def evaluate(args):
             ).to(args.device)
 
             if args.adaptive:
-                q_reps = ada_encoder(
-                    None, None, 
-                    f_inputs['input_ids'], f_inputs['attention_mask'],
-                    prev_output=q_outputs.prev_out
-                ).reps
-
-            elif 'doc' in args.d_encoder_name:
-                q_reps = transform_ids_to_vector(f_inputs.input_ids, tokenizer, count=True)
-
+                q_reps = self.q_encoder(
+                    input_ids=f_inpus['input_ids'],
+                    attention_mask=f_inputs['attention_mask'],
+                )
             else:
-                if args.context_masking:
-                    padding = f_inputs['attention_mask'].size(1) - q_inputs['attention_mask'].size(1)
-                    context_mask = F.pad(q_inputs['attention_mask'], (0, padding))
-                else:
-                    context_mask = None
-
-                q_reps = ada_encoder(
-                    f_inputs['input_ids'], 
-                    f_inputs['attention_mask'],
-                    context_mask=context_mask
-                ).reps
+                q_reps = transform_ids_to_vector(f_inputs['input_ids'], tokenizer, count=args.count)
             
             ### Re-retrieve
             hits = searcher.batch_search(
@@ -195,6 +161,7 @@ def evaluate(args):
                 threads=32
             )
 
+        # convert to runs
         for id in batch_q_ids:
             try:
                 batch_runs = {h.docid: h.score for h in hits[id]}
@@ -222,11 +189,11 @@ if __name__ == '__main__':
     parser.add_argument("--repeat_query", type=int, default=0)
     parser.add_argument("--prompt_type", type=str, default='qr')
     parser.add_argument("--adaptive", action='store_true', default=False) # leaned or zero-shot
-    parser.add_argument("--context_masking", action='store_true', default=False)
+    parser.add_argument("--count", action='store_true', default=False)
 
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--save_pickle", action='store_true', default=False)
-    parser.add_argument("--max_length", type=int, default=256)
+    parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--device", type=str, default='cuda') 
     parser.add_argument("--debug", type=int, default=None)
     parser.add_argument("--exp", type=str, default='debug')
@@ -236,7 +203,7 @@ if __name__ == '__main__':
     print(f" ============= ")
     print(f" [Data path] {args.dataset_dir}")
     print(f" [Rd] {args.d_encoder_name} [Rq] {args.q_encoder_name_or_path} [G] {args.generator_name}")
-    print(f"### {args.dataset_dir.split('/')[-1]} | {args.exp} | {results[0]:.4f} | {results[1]:.4f} |")
+    print(f"### {args.dataset_dir.split('/')[-1]} | {args.exp} | {results[0]:.4f} |")
     print(f" ============= ")
 
     if args.save_pickle:

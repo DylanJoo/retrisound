@@ -22,30 +22,34 @@ TOTAL_BATCH_SIZE=16
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
-MODEL_SIZE=3B
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
 echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
+MODEL_SIZE=3B
 BASE_LLM=meta-llama/Llama-3.2-3B-Instruct
-num_layers=2
+# MODEL_SIZE=8B
+# BASE_LLM=allenai/Llama-3.1-Tulu-3.1-8B
+# BASE_LLM=meta-llama/Llama-3.1-8B-Instruct
+
+num_layers=1
 num_labels=1
 tc_coef=1
 rl_coef=1
 num_gen=1
 init=splade-v3-doc
 
-for dataset_name in dbpedia-entity nfcorpus trec-covid scidocs climate-fever;do
-for topk in 30; do
+for dataset_name in trec-covid dbpedia-entity climate-fever webis-touche2020 scidocs nfcorpus;do
+for topk in 100; do
 for num_samples in 100;do
-for rl_coef in 1 0; do
+for rl_coef in 1; do
 
 dataset=inpars-v2/$dataset_name
 exp=${dataset_name}-${init}-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
-    --main_process_port 29600 \
+    --main_process_port 29605 \
     train_pl.py \
     --retriever_name_or_path $BASE_RET \
     --query_encoder_name_or_path $BASE_RET \
@@ -64,15 +68,15 @@ accelerate launch \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
     --learning_rate 1e-4 \
     --lr_scheduler_type cosine \
-    --warmup_ratio 0.25 \
+    --warmup_ratio 0.1 \
     --weight_decay 0. \
-    --max_grad_norm 0.5 \
-    --max_steps 1000 \
+    --max_grad_norm 1 \
+    --max_steps 500 \
     --save_steps 500 \
     --output_dir ${MODEL_DIR}/ada_lsr_${MODEL_SIZE}/${dataset##*/}/${num_labels} \
     --report_to wandb \
     --generation_batch 16 \
-    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
+    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 1 \
     --num_steps 1 --n_max_segments 15 \
     --ct_coef 0.0 \
     --tc_coef $tc_coef \

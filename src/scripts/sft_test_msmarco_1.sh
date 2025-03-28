@@ -1,12 +1,12 @@
 #!/bin/sh
-#SBATCH --job-name=24h.inpars-mb
+#SBATCH --job-name=msmarco-pl
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -34,29 +34,26 @@ BASE_LLM=meta-llama/Llama-3.2-3B-Instruct
 # BASE_LLM=meta-llama/Llama-3.1-8B-Instruct
 
 num_layers=1
-num_labels=2
+num_labels=1
 tc_coef=1
 rl_coef=1
 num_gen=1
 init=splade-v3-doc
 
-# for dataset_name in trec-covid dbpedia-entity climate-fever webis-touche2020 scidocs nfcorpus;do
-for dataset_name in robust04;do
-for topk in -1; do
+for topk in 30; do
 for num_samples in 100;do
-for rl_coef in 0 1 -1; do
+for rl_coef in -1; do
 
-dataset=inpars-v2/$dataset_name
-exp=${dataset_name}-${init}-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
+exp=msmarco-passage-random-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
-    --main_process_port 29604 \
-    train_mb.py \
+    --main_process_port 29609 \
+    train_pl.py \
     --retriever_name_or_path $BASE_RET \
     --query_encoder_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
-    --train_file $DATA_DIR/${dataset} \
-    --eval_file $DATA_DIR/${dataset/inpars-v2/beir-cellar} \
+    --train_file msmarco-passage/train \
+    --eval_file msmarco-passage/trec-dl-2019 \
     --num_layers $num_layers \
     --num_samples $num_samples \
     --topk $topk \
@@ -67,17 +64,17 @@ accelerate launch \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 1e-4 \
+    --learning_rate 5e-4 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
     --max_grad_norm 1 \
     --max_steps 500 \
     --save_steps 500 \
-    --output_dir ${MODEL_DIR}/ada_lsr_${MODEL_SIZE}/${dataset##*/}/${num_labels} \
+    --output_dir ${MODEL_DIR}/ada_lsr_${MODEL_SIZE}/ \
     --report_to wandb \
     --generation_batch 16 \
-    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
+    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 1 \
     --num_steps 1 --n_max_segments 15 \
     --ct_coef 0.0 \
     --tc_coef $tc_coef \
@@ -87,9 +84,8 @@ accelerate launch \
     --eval_strategy steps \
     --eval_steps 100 \
     --fp16 \
-    --index_dir ${INDEX_DIR}/${dataset/inpars-v2/beir-cellar}.lucene_doc \
+    --index_dir ${INDEX_DIR}/msmarco-passage/splade-v3-doc.lucene \
     --logging_steps 1 --run_name $exp
-done
 done
 done
 done

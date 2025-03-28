@@ -1,12 +1,12 @@
 #!/bin/sh
-#SBATCH --job-name=10hr.msmarco
+#SBATCH --job-name=robust04-mb
 #SBATCH --partition gpu
-#SBATCH --gres=gpu:nvidia_titan_v:4
-#SBATCH --mem=128G
+#SBATCH --gres=gpu:nvidia_rtx_a6000:1
+#SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=10:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -22,33 +22,39 @@ TOTAL_BATCH_SIZE=16
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 MODEL_DIR=/ivi/ilps/personal/dju/checkpoints
 BASE_RET=naver/splade-v3-doc
-MODEL_SIZE=gpt
 
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs" 
 echo "$BATCH_SIZE_PER_GPU batch size per GPU" 
 echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
-BASE_LLM=gpt3.5
-num_labels=1
-num_layers=2
+MODEL_SIZE=3B
+BASE_LLM=meta-llama/Llama-3.2-3B-Instruct
+# MODEL_SIZE=8B
+# BASE_LLM=allenai/Llama-3.1-Tulu-3.1-8B
+# BASE_LLM=meta-llama/Llama-3.1-8B-Instruct
+
+num_layers=1
+num_labels=2
 tc_coef=1
 rl_coef=1
 num_gen=1
+init=splade-v3-doc
 
-for topk in 30; do
-for num_samples in 10;do
-for rl_coef in -1; do
+for topk in -1; do
+for num_samples in 100;do
+for rl_coef in 1 -1; do
 
-dataset=msmarco-passage/train
-exp=$dataset-random-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
+dataset=inpars-v2/robust04
+exp=robust04-${init}-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
-    --main_process_port 29600 \
-    train_pl.py \
+    --main_process_port 29604 \
+    train_mb.py \
     --retriever_name_or_path $BASE_RET \
     --query_encoder_name_or_path $BASE_RET \
-    --train_file ${dataset} \
-    --eval_file ${dataset/train/trec-dl-2019} \
+    --generator_name_or_path $BASE_LLM \
+    --train_file $DATA_DIR/${dataset} \
+    --eval_file disks45/nocr/trec-robust-2004 \
     --num_layers $num_layers \
     --num_samples $num_samples \
     --topk $topk \
@@ -63,10 +69,10 @@ accelerate launch \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
-    --max_grad_norm 0.5 \
-    --max_steps 10000 \
-    --save_steps 2500 \
-    --output_dir ${MODEL_DIR}/ada_lsr_${MODEL_SIZE}/ \
+    --max_grad_norm 1 \
+    --max_steps 500 \
+    --save_steps 500 \
+    --output_dir ${MODEL_DIR}/ada_lsr_${MODEL_SIZE}/${dataset##*/}/${num_labels} \
     --report_to wandb \
     --generation_batch 16 \
     --n_contexts 10 --n_max_candidates 10 --n_negative_samples 2 \
@@ -79,7 +85,7 @@ accelerate launch \
     --eval_strategy steps \
     --eval_steps 100 \
     --fp16 \
-    --index_dir ${INDEX_DIR}/${dataset}/splade-v3-doc.lucene \
+    --index_dir ${INDEX_DIR}/robust04/splade-v3-doc.lucene \
     --logging_steps 1 --run_name $exp
 done
 done
