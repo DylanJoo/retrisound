@@ -15,7 +15,7 @@ class SparseAdaptiveRetriever(nn.Module):
         q_encoder,
         encoder=None, 
         num_samples=100,
-        count=True
+        count=True,
         **kwargs # opt is unused
     ):
         super().__init__()

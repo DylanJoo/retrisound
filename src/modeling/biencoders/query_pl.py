@@ -80,7 +80,7 @@ class SparseAdaptiveRetriever(nn.Module):
             )
 
             for selection in selections:
-                rep = transform_ids_to_vector(selection, tokenizer, count=count)
+                rep = transform_ids_to_vector(selection, tokenizer, count=self.count)
                 sampled_reps.append(rep)
 
             # expand tokens

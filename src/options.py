@@ -28,6 +28,7 @@ class DataOptions:
     depth: Optional[int] = field(default=30)
     index_dir: Optional[str] = field(default="")
     eval_index_dir: Optional[str] = field(default=None)
+    title_as_query: Optional[bool] = field(default=False)
 
 from transformers import TrainingArguments
 @dataclass
@@ -45,6 +46,7 @@ class ReinforceOptions(TrainingArguments):
     learning_rate: float = field(default=5e-5)
     update_epochs: Optional[int] = field(default=4)
     generation_batch: Optional[int] = field(default=2)
+    generation_length: Optional[int] = field(default=128)
     report_to: Optional[str] = field(default="wandb")
     ct_coef: Optional[float] = field(default=0.0)
     tc_coef: Optional[float] = field(default=0.0)
@@ -54,6 +56,7 @@ class ReinforceOptions(TrainingArguments):
     sample_type: Optional[str] = field(default='deterministic')
     num_samples: Optional[int] = field(default=3)
     quick_test: Optional[int] = field(default=None)
+    baseline_regularization: bool = field(default=False)
 
 @dataclass
 class LLMOptions:

@@ -43,7 +43,7 @@ def main():
         generator = LLM(
             model=model_opt.generator_name_or_path, temperature=0.7,
             max_num_batched_tokens=20480, max_model_len=20480,
-            gpu_memory_utilization=0.5
+            gpu_memory_utilization=0.8
         )
 
     # [Environment: Searcher]
@@ -58,8 +58,6 @@ def main():
         n_max_segments=train_opt.n_max_segments,
         n_negative_samples=model_opt.n_negative_samples,
     )
-    # if 'msmarco' in data_opt.train_file:
-    #     train_dataset.load_prebuilt_feedback()
 
     if train_opt.do_eval:
         eval_dataset = PRFDataset(
@@ -67,7 +65,8 @@ def main():
             split='test',
             n_max_segments=train_opt.n_max_segments,
             n_negative_samples=model_opt.n_negative_samples,
-            max_examples=32
+            max_examples=32,
+            title_as_query=data_opt.title_as_query
         )
         if data_opt.eval_index_dir is not None:
             eval_searcher = load_searcher(data_opt.eval_index_dir, lexical=True)

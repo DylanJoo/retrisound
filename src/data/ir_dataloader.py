@@ -45,7 +45,7 @@ class IRDataLoader:
             raise ValueError(f"File {fIn} must be present with extension {ext}")
 
     def load_from_ir_datasets(
-        self, ignore_corpus=False
+        self, ignore_corpus=False, title_as_query=False
     ) -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, int]]]:
         dataset = ir_datasets.load(self.prefix)
 
@@ -66,7 +66,10 @@ class IRDataLoader:
         # Queries
         logger.info("Loading Queries...")
         for query in dataset.queries_iter():
-            self.queries[query.query_id] = query.text if hasattr(query, "text") else query.description
+            if title_as_query:
+                self.queries[query.query_id] = query.text if hasattr(query, "text") else query.title
+            else:
+                self.queries[query.query_id] = query.text if hasattr(query, "text") else query.description
 
         # Qrels
         for qrel in dataset.qrels_iter():

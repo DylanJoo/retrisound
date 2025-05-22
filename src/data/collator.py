@@ -43,7 +43,6 @@ class PRFCollator(DefaultDataCollator):
         initial_q = self.tokenizer(
             [f['query'] for f in features],
             add_special_tokens=True,
-            max_length=128,
             truncation=self.truncation,
             padding=self.padding,
             return_tensors='pt'

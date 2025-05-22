@@ -64,11 +64,11 @@ def apply_mqa_inst_prompt(Q, D, R=None, prefix=None):
         "Write a short passage that answers the given question. Only use the given relevant search results to draft the passage " + \
         "(some of the search results might be irrelevant). " + \
         "Answer the question step by step. " + \
-        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
+        "The passage should less than 100 words and is enclosed within <p> </p> tags."
     prompt_1 = \
         "Based on the given question and the draft passage, refine the draft passage if any search results can answer the question better. " + \
         "(some of the search results might be irrelevant). " + \
-        "The passage shoule less than 100 words and is enclosed within <p> </p> tags."
+        "The passage should less than 100 words and is enclosed within <p> </p> tags."
     if R is None:
         template = "{prompt}\n\nQuestion: {Q}\nSearch results:\n{D}\nPassage:\n<p>"
         p = template.replace('{prompt}', prompt_0)
@@ -83,11 +83,11 @@ def apply_report_inst_prompt(Q, D=None, R=None, prefix=None):
     prompt_0 = \
         "Write a concise passage that answers the given query. Only use the given relevant search results to draft the passage " + \
         "(some of the search results might be irrelevant). " + \
-        "The passage shoule be within 50 words and be enclosed within <p> </p> tags."
+        "The passage should be within 100 words and be enclosed within <p> </p> tags."
     prompt_1 = \
         "Refine the draft passage if any search results can answer the given query better. " + \
         "(some of the search results might be irrelevant). " + \
-        "The passage shoule be within 50 words and be enclosed within <p> </p> tags."
+        "The passage should be within 100 words and be enclosed within <p> </p> tags."
     if R is None:
         template = "{prompt}\n\nQuery: {Q}\nSearch results:\n{D}\nPassage:\n<p> "
         p = template.replace('{prompt}', prompt_0)
@@ -97,17 +97,17 @@ def apply_report_inst_prompt(Q, D=None, R=None, prefix=None):
     p = p.replace("{Q}", Q).replace("{D}", D)
     return p
 
-def apply_report_inst_prompt_zs(Q, D):
-    prompt = "Write a concise passage that answers the given query. The passage should be witin 50 words and be enclosed within <p></p> tags."
-    template = "{prompt}\n\nQuery: {Q}\nPassage:\n<p>"
-    p = template.replace('{prompt}', prompt).replace('{Q}', Q)
-    return p
-
-def apply_rewrite_inst_prompt_zs(Q, D):
-    prompt = "Rewrite the query with richer contexts. The rewritten query should be withint 50 words and be dnclosed with <q></q> tags."
-    template = "{prompt}\n\nQuery: {Q}\nRewritten query:\n<q>"
-    p = template.replace('{prompt}', prompt).replace("{Q}", Q)
-    return p
+# def apply_report_inst_prompt_zs(Q, D):
+#     prompt = "Write a concise passage that answers the given query. The passage should be witin 50 words and be enclosed within <p></p> tags."
+#     template = "{prompt}\n\nQuery: {Q}\nPassage:\n<p>"
+#     p = template.replace('{prompt}', prompt).replace('{Q}', Q)
+#     return p
+#
+# def apply_rewrite_inst_prompt_zs(Q, D):
+#     prompt = "Rewrite the query with richer contexts. The rewritten query should be withint 50 words and be dnclosed with <q></q> tags."
+#     template = "{prompt}\n\nQuery: {Q}\nRewritten query:\n<q>"
+#     p = template.replace('{prompt}', prompt).replace("{Q}", Q)
+#     return p
 
 # template_report = "{prompt_report}\n\nQuestion: {Q}\n\nContexts:\n{D}\nExplanation:\n"
 # prompt_report = "Rewrite the question with more comprehensive contexts, making the question easier to understand. Some useful preliminary knowledge could be found in the given texts (but some of which might be irrelevant)."

@@ -40,7 +40,8 @@ class PRFDataset(Dataset):
         # load from ir_datasets
         else: 
             corpus, self.queries, self.qrels = IRDataLoader(prefix=dataset_dir).load_from_ir_datasets(
-                ignore_corpus=( ('trec-dl' in dataset_dir) or ('robust' in dataset_dir) )
+                ignore_corpus=( ('trec-dl' in dataset_dir) or ('robust' in dataset_dir) ),
+                title_as_query=kwargs.pop('title_as_query', False)
             )
 
         self.dataset_dir = dataset_dir

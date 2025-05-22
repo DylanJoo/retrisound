@@ -1,12 +1,12 @@
 #!/bin/sh
-#SBATCH --job-name=10hr.msmarco
+#SBATCH --job-name=24hr.msmarco
 #SBATCH --partition gpu
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=logs/%x.%j.out
 
 # Set-up the environment.
@@ -29,52 +29,57 @@ echo "$GRADIENT_ACC_STEPS gradient accumulation steps"
 
 MODEL_SIZE=3B
 BASE_LLM=meta-llama/Llama-3.2-3B-Instruct
+# BASE_LLM=Qwen/Qwen2.5-7B-Instruct
 # MODEL_SIZE=8B
-# BASE_LLM=allenai/Llama-3.1-Tulu-3.1-8B
 # BASE_LLM=meta-llama/Llama-3.1-8B-Instruct
 
-num_layers=1
 num_labels=2
-tc_coef=1
-rl_coef=1
 num_gen=1
 init=splade-v3-doc
+baseline=nDCG
+# baseline=RR
 
 for topk in -1; do
-for num_samples in 100;do
+for num_samples in 10;do
+for tc_coef in 1; do
 for rl_coef in -1; do
+for num_layers in 1; do
 
-exp=msmarco-passage-random-L${num_layers}-TC${tc_coef}-RL${rl_coef}-num_labels${num_labels}-gen${num_gen}
+# train_dataset=$DATA_DIR/inpars-v2/msmarco
+train_dataset=msmarco-passage/train
+exp=msmarco-passage-${init}-L${num_layers}-${MODEL_SIZE}-TC${tc_coef}-RL${rl_coef}${baseline}num_labels${num_labels}-gen${num_gen}
+
 accelerate launch \
     --config_file configs/default_config_${NUM_GPUS}.yaml \
-    --main_process_port 29609 \
+    --main_process_port 29600 \
     train_mb.py \
     --retriever_name_or_path $BASE_RET \
     --query_encoder_name_or_path $BASE_RET \
     --generator_name_or_path $BASE_LLM \
-    --train_file msmarco-passage/train \
-    --eval_file msmarco-passage/trec-dl-2019 \
+    --train_file $train_dataset \
+    --eval_file msmarco-passage/trec-dl-2019/judged \
     --num_layers $num_layers \
     --num_samples $num_samples \
     --topk $topk \
     --num_generation $num_gen \
     --split train \
     --sample_type deterministic \
-    --max_src_length 512 \
+    --max_src_length 384 \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps $GRADIENT_ACC_STEPS \
-    --learning_rate 5e-4 \
-    --lr_scheduler_type cosine \
-    --warmup_ratio 0.1 \
+    --learning_rate 5e-6 \
+    --lr_scheduler_type linear \
+    --warmup_steps 2000 \
     --weight_decay 0. \
-    --max_grad_norm 1 \
-    --max_steps 500 \
-    --save_steps 500 \
-    --output_dir ${MODEL_DIR}/ada_lsr_${MODEL_SIZE}/ \
+    --max_grad_norm 5 \
+    --max_steps 10000 \
+    --save_steps 10000 \
+    --output_dir ${MODEL_DIR}/ada_lsr_${MODEL_SIZE}/msmarco-passage/${num_labels} \
     --report_to wandb \
     --generation_batch 16 \
-    --n_contexts 10 --n_max_candidates 10 --n_negative_samples 1 \
+    --generation_length 256 \
+    --n_contexts 10 --n_max_candidates 100 --n_negative_samples 1 \
     --num_steps 1 --n_max_segments 15 \
     --ct_coef 0.0 \
     --tc_coef $tc_coef \
@@ -84,8 +89,11 @@ accelerate launch \
     --eval_strategy steps \
     --eval_steps 100 \
     --fp16 \
-    --index_dir ${INDEX_DIR}/msmarco-passage/splade-v3-doc.lucene \
+    --index_dir ${INDEX_DIR}/msmarco-passage/train/splade-v3-doc.lucene \
     --logging_steps 1 --run_name $exp
+    # --baseline_regularization \
+done
+done
 done
 done
 done

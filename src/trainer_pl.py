@@ -67,7 +67,10 @@ class PolicyTrainer(Trainer):
         super().__init__(**kwargs)
         self.generator = generator
         self.searcher = searcher
-        # self.sft_annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=False)
+        if self.args.tc_coef == -1:
+            self.sft_annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=True)
+        # if self.args.rl_coef == -1:
+        #     self.rl_annealer = Annealer(self.args.max_steps // 4, shape='linear', cyclical=True)
         self.rl_annealer = Annealer(self.args.max_steps, shape='cosine', cyclical=False)
         self.num_generation = num_generation
         self.eval_searcher = eval_searcher
@@ -78,7 +81,11 @@ class PolicyTrainer(Trainer):
     def measure_ranking(pids_pred, pids_truth):
         qrel = {"dummy": pids_truth}
         run = {"dummy": {k: 1/(1+i) for i, k in enumerate(pids_pred)}}
-        result = ir_measures.calc_aggregate([nDCG@10, R@10, RR@10], qrel, run)[nDCG@10] 
+        result_all = ir_measures.calc_aggregate([nDCG@10, RR@100, nDCG@100], qrel, run)
+        if is_eval:
+            result = result_all[nDCG@10]
+        else:
+            result = result_all[nDCG@100]
         return result
 
     def get_candidates(self, hits):
@@ -108,7 +115,7 @@ class PolicyTrainer(Trainer):
             try: 
                 pids = [h.docid for h in hits[key]]
                 candidate = self.get_candidates(hits[key])
-                reward = self.measure_ranking(pids, truth[i])
+                reward = self.measure_ranking(pids, truth[i], is_eval=self.is_eval)
             except: # no retrieved results
                 candidate = []
                 reward = 0.0
@@ -131,7 +138,7 @@ class PolicyTrainer(Trainer):
         )
         feedback = []
         for i in range(0, len(prompt), gen_batch):
-            b_feedback = self.generator.generate(prompt[i:i+gen_batch], max_tokens=128) # 256 before
+            b_feedback = self.generator.generate(prompt[i:i+gen_batch], max_tokens=self.args.generation_length)
             # b_feedback = [remove_citations(f) for f in b_feedback]
             b_feedback = [replace_tags(f, 'p') for f in b_feedback]
             feedback += b_feedback
@@ -178,10 +185,10 @@ class PolicyTrainer(Trainer):
                 )
 
                 # msmarco can use pre-computed feedback. other used the online generated
-                if 'msmarco' in self.dataset_name:
-                    feedback = [self.train_dataset.feedbacks[idx][0] for idx in data_indices]
-                else:
-                    feedback = self.compute_loss_feedback(questions, candidates)
+                # if 'msmarco' in self.dataset_name:
+                #     feedback = [self.train_dataset.feedbacks[idx][0] for idx in data_indices]
+                # else:
+                feedback = self.compute_loss_feedback(questions, candidates)
                 candidates_0 = candidates
                 q_out = output
             else: 
@@ -226,12 +233,17 @@ class PolicyTrainer(Trainer):
         pos_ratio = torch.stack(pos_ratio, 0)
         logprobs = torch.stack(logprobs, 0)
 
-        # normal REINFORCE
-        rewards = torch.stack(rewards, 0).to(logprobs.device)
+        if self.args.baseline_regularization:
+            # baseline-enhanced REINFORCE
+            # rewards = [r - reward_0 for r in rewards]
+            # rewards = torch.stack(rewards, 0).to(logprobs.device)
 
-        # baseline-enhanced REINFORCE
-        # rewards = [r - reward_0 for r in rewards]
-        # rewards = torch.stack(rewards, 0).to(logprobs.device)
+            # baseline-enhanced REINFORCE (ratio)
+            rewards = [torch.log( (1e-3+r)/(1e-3+reward_0) ) for r in rewards]
+            rewards = torch.stack(rewards, 0).to(logprobs.device)
+        else:
+            # normal REINFORCE
+            rewards = torch.stack(rewards, 0).to(logprobs.device)
 
         # ignore after the reaching the optimal reward 
         if self.args.rl_coef == -1:
@@ -398,7 +410,7 @@ class PolicyTrainer(Trainer):
                         sub_token_type_ids=retriever_inputs['q_types'][t],
                         step=t,
                         tokenizer=self.tokenizer,
-                        topk=30
+                        topk=None# topk=30
                     )
                     reward, candidates = self.compute_loss_reward(output.reps, questions, truth=qrels)
                     feedback = self.compute_loss_feedback(questions, candidates, feedbacks=feedback)
